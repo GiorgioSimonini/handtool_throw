@@ -1,0 +1,8 @@
+<launch>	
+	<arg name="handtool_params" default="$(find handtool_throw)/configs/handtool_params.yaml"/>
+
+	<rosparam command="load" file="$(arg handtool_params)"/>
+	<!-- Load main node -->
+  	<node name="testing" pkg="handtool_throw" type="testing" output="screen"/>	
+
+</launch>

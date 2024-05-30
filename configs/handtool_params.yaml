@@ -1,0 +1,11 @@
+Params:
+  duty_cycle: 100
+
+optimization:
+  dist_base: 0.5
+  h_base: 0.4
+  valve_0: 0.051
+  g: 9.81
+  init_guess: [0.052, 0.0]
+  bound_valve: [0.051, 0.5]
+  bound_theta: [-90.0, 90.0]
