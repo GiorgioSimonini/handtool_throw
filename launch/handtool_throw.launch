@@ -3,6 +3,7 @@
 
 	<rosparam command="load" file="$(arg handtool_params)"/>
 	<!-- Load main node -->
-  	<node name="testing" pkg="handtool_throw" type="testing" output="screen"/>	
+  	<node name="testing" pkg="handtool_throw" type="testing" output="screen"/>
+	<node name="throwing_par" pkg="handtool_throw" type="throwing_par.py" output="screen"/>	
 
 </launch>

@@ -58,7 +58,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## Generate services in the 'srv' folder
 add_service_files(
   FILES
-  handtool_throw.srv
+  throwing_par_srv.srv
 )
 
 ## Generate actions in the 'action' folder
@@ -169,7 +169,7 @@ target_link_libraries(testing
 #   scripts/my_python_script
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
-catkin_install_python(PROGRAMS scripts/handtool_throw.py
+catkin_install_python(PROGRAMS scripts/throwing_par.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
