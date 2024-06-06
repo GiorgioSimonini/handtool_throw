@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # license removed for brevity
 import numpy as np
 from math import log, sin, cos, atan2
