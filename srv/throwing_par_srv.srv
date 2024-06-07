@@ -3,3 +3,4 @@ geometry_msgs/Point target
 ---
 uint32 result_valve_us
 geometry_msgs/Pose result_pose
+bool answer
