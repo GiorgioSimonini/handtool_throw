@@ -71,8 +71,8 @@ def objective(x, par):
     valve_dt = x[0]
     theta = x[1]
     dist = get_landing(m_obj, valve_dt, h, theta)
-    cost = (dist_desired-dist)**2 + (valve_dt-0.052)**2
-    return cost
+    obj = (dist_desired-dist)**2 + (valve_dt-0.052)**2# + (theta-0.0)**2
+    return obj
 
 # def constraint(x):
 #     return x[0] - 0.051
@@ -111,7 +111,7 @@ def get_throwing_par(m_obj, target):
 
     # get R from theta
     angle_z = atan2(target[1], target[0])
-    angle_y = -3.1415-theta
+    angle_y = -3.1415/2-theta
     R = np.matmul(R_z(angle_z), R_y(angle_y))
     
     return [valve_dt, pos_tool, R]
@@ -138,7 +138,7 @@ def callback_throwing_par(req):
 
 def handtool_server():
     rospy.init_node('handtool_server')
-    s = rospy.Service('throwing_par_srv', throwing_par_srv, callback_throwing_par)
+    s = rospy.Service('handtool_throw_service', throwing_par_srv, callback_throwing_par)
     # get parameters from yaml
     # with open('../config/handtool_parameters.yaml', 'r') as file:
     #     handtool_params = yaml.safe_load(file)
