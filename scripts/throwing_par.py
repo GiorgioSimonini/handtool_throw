@@ -71,8 +71,8 @@ def objective(x, par):
     valve_dt = x[0]
     theta = x[1]
     dist = get_landing(m_obj, valve_dt, h, theta)
-    obj = (dist_desired-dist)**2
-    return obj
+    cost = (dist_desired-dist)**2 + (valve_dt-0.052)**2
+    return cost
 
 # def constraint(x):
 #     return x[0] - 0.051
