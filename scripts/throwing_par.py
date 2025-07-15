@@ -110,10 +110,17 @@ def get_throwing_par(m_obj, target):
     print('distance: ' + str(dist))
 
     # get R from theta
+
+    # Monaco
+    # angle_x = -3.14/2
+    # angle_y = -atan2(target[1], target[0])
+    # angle_z = 3.14/2-theta
+    # R = np.matmul(R_y(angle_y), R_z(angle_z))
+    
     angle_z = atan2(target[1], target[0])
     angle_y = -3.1415/2-theta
-    R = np.matmul(R_z(angle_z), R_y(angle_y))
-    
+    R = np.linalg.multi_dot([R_z(angle_z), R_y(angle_y), R_z(3.1415/2),  R_y(-3.1415/2)]) #terna ventosa rispetto MegaPose
+
     return [valve_dt, pos_tool, R]
 
 # ----- handtool server node ----- #
