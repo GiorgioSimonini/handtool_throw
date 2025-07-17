@@ -3,7 +3,6 @@
 import numpy as np
 
 import rospy
-# from std_msgs.msg import String
 from handtool_throw.srv import throwing_par_srv, throwing_par_srvRequest
 from geometry_msgs.msg import Point
 import tf
