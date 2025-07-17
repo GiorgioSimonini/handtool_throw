@@ -60,7 +60,7 @@ def set_throw_param():
         translation_VE = T_VE[0:3, 3]
         quaternion_VE = tf.transformations.quaternion_from_matrix(T_VE)
         
-        print("Final pose:", translation_VE[0], translation_VE[1], translation_VE[2], quaternion_VE[0], quaternion_VE[1], quaternion_VE[2], quaternion_VE[3])
+        print("Tool-Hand pose:", translation_VE[0], translation_VE[1], translation_VE[2], quaternion_VE[0], quaternion_VE[1], quaternion_VE[2], quaternion_VE[3])
 
         # Multiply the transformation matrices
         T_result = np.dot(T_0V, T_VE)
