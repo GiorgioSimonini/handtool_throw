@@ -74,7 +74,7 @@ if __name__ == "__main__":
                 quaternion_result,
                 rospy.Time.now(),
                 "robot_arm_link0",   # child frame
-                "config"             # parent frame
+                "config_pose"             # parent frame
             )
             rate.sleep()
 
