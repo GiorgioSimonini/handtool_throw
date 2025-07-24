@@ -65,7 +65,7 @@ if __name__ == "__main__":
     try:
         translation_result, quaternion_result = set_throw_param(listener)
 
-        rate = rospy.Rate(100)  # 10 Hz
+        rate = rospy.Rate(100)
 
         print("Posa desiderata pubblicata su TF")
         while not rospy.is_shutdown():
