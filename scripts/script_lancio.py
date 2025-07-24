@@ -7,67 +7,46 @@ from handtool_throw.srv import throwing_par_srv, throwing_par_srvRequest
 from geometry_msgs.msg import Point
 import tf
 
-def set_throw_param():
-        
-        param = rospy.ServiceProxy('handtool_throw_service', throwing_par_srv)
+def set_throw_param(listener):
+    param = rospy.ServiceProxy('handtool_throw_service', throwing_par_srv)
+    f = throwing_par_srvRequest()
 
-        f = throwing_par_srvRequest()
+    print("insert object weight and target x, y, z positions (m_obj x y z):")
 
-        # Get user input
-        print("insert object weight and target x, y, z positions (m_obj x y z):")
+    m_obj = float(input("Object weight (m_obj): "))
+    x, y, z = map(float, input("Target x, y, z positions: ").split())
 
-        # Read input values
-        m_obj = float(input("Object weight (m_obj): "))
-        x, y, z = map(float, input("Target x, y, z positions: ").split())
+    f.m_obj = m_obj
+    f.target = Point(x=x, y=y, z=z)
 
-        # Set service request parameters
-        f.m_obj = m_obj
+    resp1 = param(f)
 
-        target = Point()
-        target.x = x
-        target.y = y
-        target.z = z
+    t_0V = np.array([resp1.result_pose.position.x, resp1.result_pose.position.y, resp1.result_pose.position.z])
+    q_0V = np.array([resp1.result_pose.orientation.x, resp1.result_pose.orientation.y, resp1.result_pose.orientation.z, resp1.result_pose.orientation.w])
 
-        f.target = target
+    T_0V = tf.transformations.quaternion_matrix(q_0V)
+    T_0V[0:3, 3] = t_0V
 
-        resp1 = param(f)
+    while True:
+        try:
+            (t_VE, q_VE) = listener.lookupTransform("tool_extremity", "right_hand_ee_link", rospy.Time(0))
+            break
+        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
+            continue
 
-        print(resp1)
+    T_VE = tf.transformations.quaternion_matrix(q_VE)
+    T_VE[0:3, 3] = t_VE
 
-        t_0V = np.array([resp1.result_pose.position.x, resp1.result_pose.position.y, resp1.result_pose.position.z])
-        q_0V = np.array([resp1.result_pose.orientation.x, resp1.result_pose.orientation.y, resp1.result_pose.orientation.z, resp1.result_pose.orientation.w])
+    T_result = np.dot(T_0V, T_VE)
 
-        print("Ventosa pose:", t_0V[0], t_0V[1], t_0V[2], q_0V[0], q_0V[1], q_0V[2], q_0V[3])
+    translation_result = T_result[0:3, 3]
+    quaternion_result = tf.transformations.quaternion_from_matrix(T_result)
 
-        # Create homogeneous transformation matrix from translation and quaternion
-        T_0V = tf.transformations.quaternion_matrix(q_0V)
-        T_0V[0:3, 3] = t_0V
+    print("Final pose:", translation_result[0], translation_result[1], translation_result[2],
+          quaternion_result[0], quaternion_result[1], quaternion_result[2], quaternion_result[3])
 
-        # Get the transformation between the tool_extremity and the hand
-        while True:
-            try:
-                # Fixed: corrected frame order (from -> to)
-                (t_VE, q_VE) = listener.lookupTransform("tool_extremity", "right_hand_ee_link", rospy.Time(0))
-                break
-            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-                continue
+    return translation_result, quaternion_result
 
-        # Create homogeneous transformation matrix from TF lookup
-        T_VE = tf.transformations.quaternion_matrix(q_VE)
-        T_VE[0:3, 3] = t_VE
-
-        translation_VE = T_VE[0:3, 3]
-        quaternion_VE = tf.transformations.quaternion_from_matrix(T_VE)
-        
-        print("Tool-Hand pose:", translation_VE[0], translation_VE[1], translation_VE[2], quaternion_VE[0], quaternion_VE[1], quaternion_VE[2], quaternion_VE[3])
-
-        # Multiply the transformation matrices
-        T_result = np.dot(T_0V, T_VE)
-        
-        translation_result = T_result[0:3, 3]
-        quaternion_result = tf.transformations.quaternion_from_matrix(T_result)
-        
-        print("Final pose:", translation_result[0], translation_result[1], translation_result[2], quaternion_result[0], quaternion_result[1], quaternion_result[2], quaternion_result[3])
 
 if __name__ == "__main__":
 
@@ -76,16 +55,28 @@ if __name__ == "__main__":
     
     # Create TF listener
     listener = tf.TransformListener()
-    
+    broadcaster = tf.TransformBroadcaster()
+
     # Give TF listener time to receive transforms
     rospy.sleep(1.0)
 
     rospy.wait_for_service('handtool_throw_service')
 
     try:
-      
-      set_throw_param()
+        translation_result, quaternion_result = set_throw_param(listener)
+
+        rate = rospy.Rate(10)  # 10 Hz
+
+        print("Posa desiderata pubblicata su TF")
+        while not rospy.is_shutdown():
+            broadcaster.sendTransform(
+                translation_result,
+                quaternion_result,
+                rospy.Time.now(),
+                "robot_arm_link0",   # child frame
+                "config"             # parent frame
+            )
+            rate.sleep()
 
     except rospy.ServiceException as e:
-
-        print("Service call failed: %s"%e)
+        print("Service call failed: %s" % e)
