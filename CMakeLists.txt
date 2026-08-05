@@ -9,9 +9,10 @@ project(handtool_throw)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
 	roscpp
-  	rospy
-  	std_msgs
+  rospy
+  std_msgs
 	geometry_msgs
+  panda_controllers
 	message_generation
 )
 
