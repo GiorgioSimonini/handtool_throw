@@ -4,6 +4,7 @@
 #include <std_msgs/UInt8.h>
 #include <std_msgs/UInt32.h>
 #include <eigen3/Eigen/Dense>
+#include <limits>
 #include "handtool_throw/throwing_par_srv.h"
 
 // #include <tf/transform_broadcaster.h>
@@ -42,8 +43,8 @@ std_msgs::Empty empty_msg;
 std_msgs::UInt32 valve_msg;
 std_msgs::UInt8 regulator_msg;
 geometry_msgs::Point target;
-Eigen::Affine3d franka_pose;
-Eigen::Affine3d franka_pose_d;
+Eigen::Affine3d franka_pose;	// measured robot pose
+Eigen::Affine3d franka_pose_d;	// desired throwing pose, from the handtool service
 
 Eigen::Vector3d franka_pos_qualisys;
 Eigen::Quaterniond franka_quat_qualisys;
@@ -62,6 +63,10 @@ int main(int argc, char **argv)
 {       
 	ros::init(argc, argv, "testing");
 	ros::NodeHandle nh_;
+
+	// a default constructed Affine3d is uninitialized
+	franka_pose.setIdentity();
+	franka_pose_d.setIdentity();
 
 	// Subscribers
 	ros::Subscriber sub_target = nh_.subscribe("/qualisys/box_target/pose", 1, &targetCallback);
@@ -98,6 +103,17 @@ int main(int argc, char **argv)
 	while(ros::ok()){
 		cout<<"choice:   (1: set times (pre-suct,suct),  2: set regulator,  3: set valve time (us),  4: suck&throw,  5: get throw par,  6: throw loop) "<<endl;
 		cin>>choice;
+		// stop on closed input, do not spin on a bad one
+		if (cin.eof()){
+			cout<<"input closed, exiting"<<endl;
+			break;
+		}
+		if (cin.fail()){
+			cin.clear();
+			cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+			ROS_WARN("Invalid choice, expected a number");
+			continue;
+		}
 		// while (!ready) ros::spinOnce();
 		if (choice == 1){
 			// --- set times --- //
@@ -140,7 +156,11 @@ int main(int argc, char **argv)
 			target.y = y;
 			target.z = z;
 			srv.request.target = target;
-			if (handtool_client.call(srv)){
+			if (!handtool_client.call(srv)){
+				ROS_ERROR("Failed to call service");
+			} else if (!srv.response.answer){
+				ROS_ERROR("Service could not compute the throwing parameters for this request");
+			} else {
 				unsigned int valve_opt = srv.response.result_valve_us;
 				geometry_msgs::Pose pose = srv.response.result_pose;
 
@@ -154,46 +174,55 @@ int main(int argc, char **argv)
 				std::cout << "  y: " << pose.orientation.y << std::endl;
 				std::cout << "  z: " << pose.orientation.z << std::endl;
 				std::cout << "  w: " << pose.orientation.w << std::endl;
-			} else {
-				ROS_ERROR("Failed to call service");
 			}
 			ros::Duration(0.1).sleep();
 		}else if (choice == 6){
 			// - init - //
-			has_frankaBase_pose = 0;
+			has_frankaBase_pose = false;
 			has_franka_pose = false;
-			has_target_pose = 0;
+			has_target_pose = false;
 
 			// --- Complete throwing cycle --- //
 			// - get mass of object - //
+			cout<<"insert object weight (m_obj): "<<endl;
 			float m_obj;
 			cin >> m_obj;
 
-			// - get target box position - //
-			while((!has_target_pose) || (!has_franka_pose)){
+			// - get target box position and current robot pose - //
+			cout<<"waiting for target and robot poses..."<<endl;
+			while(((!has_target_pose) || (!has_franka_pose)) && ros::ok()){
 				ros::spinOnce();
 				ros::Duration(0.01).sleep();
 			}
+			if (!ros::ok()) break;
 
 			// - get throwing parameters - //
 			srv.request.m_obj = m_obj;
 			srv.request.target = target;
-			if (handtool_client.call(srv)){
-				// unsigned int valve_opt = srv.response.result_valve_us;
+			if (!handtool_client.call(srv)){
+				ROS_ERROR("Failed to call throw parameters service, no command is sent");
+				continue;
+			}
+			if (!srv.response.answer){
+				ROS_ERROR("Throw parameters service could not solve for this target, no command is sent");
+				continue;
+			}
+			{	// scope of the service response
 				valve_us = srv.response.result_valve_us;
 				geometry_msgs::Pose pose = srv.response.result_pose;
 
-				franka_pose.translation() = Eigen::Vector3d(
+				// the service returns the DESIRED throwing pose
+				franka_pose_d.translation() = Eigen::Vector3d(
 					pose.position.x,
 					pose.position.y,
 					pose.position.z);
-					
+
 				Eigen::Quaterniond quat(
 					pose.orientation.w,
 					pose.orientation.x,
 					pose.orientation.y,
 					pose.orientation.z);
-				franka_pose.linear() = quat.toRotationMatrix();
+				franka_pose_d.linear() = quat.normalized().toRotationMatrix();
 
 				std::cout << "Valve time in us:" << valve_us << std::endl;
 				std::cout << "Position:" << std::endl;
@@ -205,8 +234,6 @@ int main(int argc, char **argv)
 				std::cout << "  y: " << pose.orientation.y << std::endl;
 				std::cout << "  z: " << pose.orientation.z << std::endl;
 				std::cout << "  w: " << pose.orientation.w << std::endl;
-			} else {
-				ROS_ERROR("Failed to call throw parameters service");
 			}
 			// - set valve optimal time - //
 			valve_msg.data = valve_us;
@@ -225,6 +252,7 @@ int main(int argc, char **argv)
 			Eigen::Quaterniond franka_quat;
 
 			// - common parts - //
+			// from the measured pose to the desired throwing pose
 			pos_start << franka_pose.translation();
 			pos_end << franka_pose_d.translation();
 			Eigen::Matrix3d franka_rot = franka_pose.linear().transpose() * franka_pose_d.linear();

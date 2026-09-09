@@ -26,12 +26,13 @@ IG_theta = 0.0
 def fun_energy(x, x0):
     x = float(x)
     x0 = float(x0)
-    if x > x0:
-        # identified parameters
-        a1 = 2.0
-        a2 = 1.0
-        a3 = -0.05092
-        b = 20.0
+    # identified parameters
+    a1 = 2.0
+    a2 = 1.0
+    a3 = -0.05092
+    b = 20.0
+    # the model is a logarithm, it is only defined above the a3 offset
+    if (x > x0) and (a2*x + a3 > 0.0) and (a2*x0 + a3 > 0.0):
         y = float(a1*log(a2*x+a3, b) - a1*log(a2*x0+a3, b))
     else:
         y = 0.0
@@ -53,11 +54,24 @@ def get_target_info(target):
     d_xy_target = target - np.array([0, 0, target[2]])
     pos_tool = d_xy_target/np.linalg.norm(d_xy_target)*dist_base
     pos_tool[2] = h_base
-    
+
     dist = np.linalg.norm(d_xy_target) - dist_base
-    
+
     h = h_base - target[2]
     return [dist, h, pos_tool]
+
+def check_target(m_obj, target):
+    # - returns an error string, empty if the request can be served - #
+    if not np.all(np.isfinite(target)):
+        return 'target is not finite'
+    if (not np.isfinite(m_obj)) or (m_obj <= 0.0):
+        return 'object mass must be positive, got {}'.format(m_obj)
+    dist_xy = np.linalg.norm(target[0:2])
+    if dist_xy <= dist_base:
+        # tool stands at dist_base from the base, on the base-target direction:
+        # a closer target has no throwing distance and a null one has no direction
+        return 'target xy distance ({:.3f} m) must be greater than dist_base ({:.3f} m)'.format(dist_xy, dist_base)
+    return ''
 
 def get_landing(m_obj, valve_dt, h, theta):
     v_obj = np.sqrt(2 * fun_energy(valve_dt, valve_0) / m_obj)
@@ -91,7 +105,7 @@ def get_throwing_par(m_obj, target):
     print('Initial SSE Objective: ' + str(objective(x0, par)))
     
     # optimize
-    bnds = (bound_valve, bound_theta)
+    bnds = (tuple(bound_valve), tuple(bound_theta))
     # con1 = {'type': 'ineq', 'fun': constraint}
     # cons = ([con1])
     # solution = minimize(objective, x0, args=(par,), method='SLSQP', bounds=bnds, constraints=cons)
@@ -99,6 +113,11 @@ def get_throwing_par(m_obj, target):
     x = solution.x
     valve_dt = x[0]
     theta = x[1]
+    if not solution.success:
+        rospy.logerr('handtool_server: optimization failed: %s', solution.message)
+    if not np.all(np.isfinite(x)):
+        rospy.logerr('handtool_server: optimization returned a non finite solution')
+        return [valve_dt, pos_tool, np.identity(3), False]
     # show final objective
     print('Final SSE Objective: ' + str(objective(x, par)))
     
@@ -121,13 +140,24 @@ def get_throwing_par(m_obj, target):
     angle_y = -3.1415/2-theta
     R = np.linalg.multi_dot([R_z(angle_z), R_y(angle_y), R_z(3.1415/2),  R_y(-3.1415/2)]) #terna ventosa rispetto MegaPose
 
-    return [valve_dt, pos_tool, R]
+    return [valve_dt, pos_tool, R, bool(solution.success)]
 
 # ----- handtool server node ----- #
 def callback_throwing_par(req):
     m_obj = req.m_obj
     target = np.array([req.target.x, req.target.y, req.target.z])
-    [valve_dt, pos_tool, R] = get_throwing_par(m_obj, target)
+    # - reject a request that cannot be served, answer stays False - #
+    error = check_target(m_obj, target)
+    if error:
+        rospy.logerr('handtool_server: rejected request, %s', error)
+        return throwing_par_srvResponse(answer = False)
+    try:
+        [valve_dt, pos_tool, R, success] = get_throwing_par(m_obj, target)
+    except (ValueError, ZeroDivisionError, FloatingPointError) as e:
+        rospy.logerr('handtool_server: throwing parameters computation failed: %s', e)
+        return throwing_par_srvResponse(answer = False)
+    if not success:
+        return throwing_par_srvResponse(answer = False)
     valve_us = int(valve_dt*1e6)
     r = rot.from_matrix(R)
     print("R: ")
@@ -141,11 +171,10 @@ def callback_throwing_par(req):
     pose.orientation.y = quat[1]
     pose.orientation.z = quat[2]
     pose.orientation.w = quat[3]
-    return throwing_par_srvResponse(result_valve_us = valve_us, result_pose = pose)
+    return throwing_par_srvResponse(result_valve_us = valve_us, result_pose = pose, answer = True)
 
 def handtool_server():
     rospy.init_node('handtool_server')
-    s = rospy.Service('handtool_throw_service', throwing_par_srv, callback_throwing_par)
     # get parameters from yaml
     # with open('../config/handtool_parameters.yaml', 'r') as file:
     #     handtool_params = yaml.safe_load(file)
@@ -157,23 +186,30 @@ def handtool_server():
     global bound_theta
     global IG_valve
     global IG_theta
-    # dist_base = handtool_params['optimization']['dist_base']
-    # h_base = handtool_params['optimization']['h_base']
-    # valve_0 = handtool_params['optimization']['valve_0']
-    # g = handtool_params['optimization']['g']
-    # bound_valve = handtool_params['optimization']['bound_valve']
-    # bound_theta = handtool_params['optimization']['bound_theta']
-    # IG_valve = handtool_params['optimization']['IG_valve']
-    # IG_theta = handtool_params['optimization']['IG_theta']
-    dist_base = rospy.get_param('optimization/dist_base')
-    h_base = rospy.get_param('optimization/h_base')
-    valve_0 = rospy.get_param('optimization/valve_0')
-    g = rospy.get_param('optimization/g')
-    bound_valve = rospy.get_param('optimization/bound_valve')
-    bound_theta = rospy.get_param('optimization/bound_theta')
-    IG_valve = rospy.get_param('optimization/IG_valve')
-    IG_theta = rospy.get_param('optimization/IG_theta')
-    
+    # - the module values are used as fallback, so a missing yaml does not kill the node - #
+    dist_base = rospy.get_param('optimization/dist_base', dist_base)
+    h_base = rospy.get_param('optimization/h_base', h_base)
+    valve_0 = rospy.get_param('optimization/valve_0', valve_0)
+    g = rospy.get_param('optimization/g', g)
+    bound_valve = rospy.get_param('optimization/bound_valve', bound_valve)
+    # bound_theta is given in degrees on the parameter server, the optimization works in radians
+    bound_theta_deg = rospy.get_param('optimization/bound_theta_deg', None)
+    if bound_theta_deg is None:
+        rospy.logwarn("handtool_server: 'optimization/bound_theta_deg' not found, using default %s rad", bound_theta)
+    else:
+        bound_theta = [np.deg2rad(bound_theta_deg[0]), np.deg2rad(bound_theta_deg[1])]
+    IG_valve = rospy.get_param('optimization/IG_valve', IG_valve)
+    IG_theta = rospy.get_param('optimization/IG_theta', IG_theta)
+    # - check the initial guesses lie inside the bounds, SLSQP would clip them silently - #
+    IG_valve = min(max(IG_valve, bound_valve[0]), bound_valve[1])
+    IG_theta = min(max(IG_theta, bound_theta[0]), bound_theta[1])
+    rospy.loginfo('handtool_server: valve bounds [%f, %f] s, theta bounds [%f, %f] rad',
+                  bound_valve[0], bound_valve[1], bound_theta[0], bound_theta[1])
+
+    # - advertise the service only once the parameters are loaded - #
+    s = rospy.Service('handtool_throw_service', throwing_par_srv, callback_throwing_par)
+    rospy.loginfo("handtool_server: 'handtool_throw_service' ready")
+
     # spin the node
     rospy.spin()
 
