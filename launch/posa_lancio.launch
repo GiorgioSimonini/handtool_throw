@@ -1,7 +1,0 @@
-<launch>
-                      
-  <node pkg="handtool_throw" type="script_lancio.py" name="lancio" output="screen">
-                    
-  </node>
-
-</launch>
