@@ -137,8 +137,8 @@ def get_throwing_par(m_obj, target):
     # R = np.matmul(R_y(angle_y), R_z(angle_z))
     
     angle_z = atan2(target[1], target[0])
-    angle_y = -3.1415/2-theta
-    R = np.linalg.multi_dot([R_z(angle_z), R_y(angle_y), R_z(3.1415/2),  R_y(-3.1415/2)]) #terna ventosa rispetto MegaPose
+    angle_y = np.pi/2-theta
+    R = np.linalg.multi_dot([R_z(angle_z), R_y(angle_y), R_z(np.pi/2),  R_y(-np.pi/2)]) #terna ventosa rispetto MegaPose
 
     return [valve_dt, pos_tool, R, bool(solution.success)]
 
