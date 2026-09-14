@@ -12,15 +12,19 @@ from handtool_throw.srv import throwing_par_srv, throwing_par_srvResponse
 from std_msgs.msg import UInt32
 from geometry_msgs.msg import Pose, Point, Quaternion
 
-# --- global parameters --- #
-dist_base = 0.5 # plant distance from base
-h_base = 0.4	# tool height
+# --- global parameters, replaced by yaml --- #
+dist_base = 0.7 # plant distance from base
+h_base = 0.5	# tool height
 valve_0 = 0.051
 g = 9.81
 bound_valve = (0.051, 0.3)
-bound_theta = (-3.1415/2, 3.1415/2)
+bound_theta = (-np.pi/2, np.pi/2)
 IG_valve = 0.052
 IG_theta = 0.0
+# optimization weights
+r_obj = 1.0
+r_valve = 0.1
+r_theta = 0.1
     
 # ----- functions ----- #
 def fun_energy(x, x0):
@@ -85,7 +89,7 @@ def objective(x, par):
     valve_dt = x[0]
     theta = x[1]
     dist = get_landing(m_obj, valve_dt, h, theta)
-    obj = (dist_desired-dist)**2 + (valve_dt-0.052)**2# + (theta-0.0)**2
+    obj = r_obj*(dist_desired-dist)**2 + r_valve*(valve_dt-0.052)**2 + r_theta*(theta-np.pi/4)**2
     return obj
 
 # def constraint(x):
@@ -131,9 +135,9 @@ def get_throwing_par(m_obj, target):
     # get R from theta
 
     # Monaco
-    # angle_x = -3.14/2
+    # angle_x = -np.pi/2
     # angle_y = -atan2(target[1], target[0])
-    # angle_z = 3.14/2-theta
+    # angle_z = np.pi/2-theta
     # R = np.matmul(R_y(angle_y), R_z(angle_z))
     
     angle_z = atan2(target[1], target[0])
