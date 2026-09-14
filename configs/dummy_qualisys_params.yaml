@@ -9,4 +9,4 @@ dummy_qualisys:
     rpy_deg: [0.0, 0.0, 0.0]        # [deg]
 
   target:                           # target box position in the mocap frame
-    position: [1.5, 0.0, 0.0]       # [m], xy distance from the base must exceed dist_base
+    position: [3.0, 0.0, 0.0]       # [m], xy distance from the base must exceed dist_base

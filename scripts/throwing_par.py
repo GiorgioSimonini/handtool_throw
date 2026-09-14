@@ -21,10 +21,15 @@ bound_valve = (0.051, 0.3)
 bound_theta = (-np.pi/2, np.pi/2)
 IG_valve = 0.052
 IG_theta = 0.0
-# optimization weights
-r_obj = 1.0
-r_valve = 0.1
-r_theta = 0.1
+# --- optimization weights and references --- #
+valve_ref   = 0.06       # [s]   valve time we trust. Kept well clear of the pole in fun_energy: at 0.052 a 100 us timing jitter moved the landing point by 3.3 cm, at 0.06 by 0.2 cm.
+theta_ref   = np.pi/4    # [rad] preferred launch angle
+w_valve     = 1.0        # weight on the normalised valve deviation (expensive)
+w_theta     = 0.1       # weight on the normalised theta deviation (cheap -> used first)
+valve_scale = 0.001      # [s]   normalisation of the valve deviation. NOT the bound range: fun_energy has a pole at valve_0-a3, so the whole useful dynamic range sits within ~1 ms of it. With 0.05 here a valve move looks free and the valve, not theta, ends up doing the aiming.
+theta_scale = np.pi/4    # [rad] normalisation of the theta deviation
+dist_scale  = 1.0        # [m]   normalisation of the distance constraint
+dist_tol    = 1e-3       # [m]   a solution missing by more than this is reported as failed
     
 # ----- functions ----- #
 def fun_energy(x, x0):
@@ -82,55 +87,72 @@ def get_landing(m_obj, valve_dt, h, theta):
     distance = complex(v_obj*cos(theta)/g * ( v_obj * sin(theta) + np.sqrt(v_obj**2 * sin(theta)**2 + 2*g*h)))
     return distance.real
 
-def objective(x, par):
-    m_obj = par[0]
-    target = par[1]
-    [dist_desired, h, pos_tool]  = get_target_info(target)
+def cost(x):
+    # - only decides HOW to hit the target, the distance itself is a constraint - #
     valve_dt = x[0]
     theta = x[1]
-    dist = get_landing(m_obj, valve_dt, h, theta)
-    obj = r_obj*(dist_desired-dist)**2 + r_valve*(valve_dt-0.052)**2 + r_theta*(theta-np.pi/4)**2
-    return obj
+    return (w_valve*((valve_dt - valve_ref)/valve_scale)**2
+            + w_theta*((theta - theta_ref)/theta_scale)**2)
 
-# def constraint(x):
-#     return x[0] - 0.051
+def constraint_dist(x, m_obj, h, dist_desired):
+    # - equality constraint: the throw has to land on the target - #
+    return (get_landing(m_obj, x[0], h, x[1]) - dist_desired)/dist_scale
 
 def get_throwing_par(m_obj, target):
-    [target_dist, h, pos_tool] = get_target_info(target)
-    # - solve optimization - #
-    # - parameters - #
-    par = (m_obj, target) # tuple of parameters to pass
-    # initial guesses
-    x0 = np.zeros(2)
-    x0[0] = IG_valve
-    x0[1] = IG_theta
-    
-    # show initial objective
-    print('Initial SSE Objective: ' + str(objective(x0, par)))
-    
-    # optimize
+    [dist_desired, h, pos_tool] = get_target_info(target)
+
+    lo = np.array([bound_valve[0], bound_theta[0]])
+    hi = np.array([bound_valve[1], bound_theta[1]])
     bnds = (tuple(bound_valve), tuple(bound_theta))
-    # con1 = {'type': 'ineq', 'fun': constraint}
-    # cons = ([con1])
-    # solution = minimize(objective, x0, args=(par,), method='SLSQP', bounds=bnds, constraints=cons)
-    solution = minimize(lambda x : objective(x, par), x0,  method='SLSQP', bounds=bnds)
-    x = solution.x
+    cons = [{'type': 'eq',
+             'fun': lambda x: constraint_dist(x, m_obj, h, dist_desired)}]
+
+    # theta is the actuator that does the aiming, so the restarts spread over theta.
+    # SLSQP started exactly on a bound (IG_theta = 0) can terminate there after two
+    # iterations and still report success, so a single start is not enough.
+    starts = [np.array([IG_valve, IG_theta]),
+              np.array([valve_ref, theta_ref]),
+              np.array([valve_ref, 0.2]),
+              np.array([valve_ref, 1.2])]
+
+    feasible = []   # (cost, miss, x) of the starts that actually hit the target
+    fallback = None # best effort if none of them does
+    for x_start in starts:
+        sol = minimize(cost, np.clip(x_start, lo, hi),
+                       method='SLSQP', bounds=bnds, constraints=cons)
+        if not np.all(np.isfinite(sol.x)):
+            continue
+        miss = abs(get_landing(m_obj, sol.x[0], h, sol.x[1]) - dist_desired)
+        if miss <= dist_tol:
+            feasible.append((cost(sol.x), miss, sol.x))
+        elif fallback is None or miss < fallback[1]:
+            fallback = (cost(sol.x), miss, sol.x)
+
+    if feasible:
+        feasible.sort(key=lambda t: t[0])   # among the throws that hit, the cheapest
+        obj, miss, x = feasible[0]
+        success = True
+    elif fallback is not None:
+        # the target cannot be reached inside the valve/theta bounds
+        obj, miss, x = fallback
+        success = False
+        rospy.logerr('handtool_server: target out of reach, best miss %.4f m (tolerance %.4f m)',
+                     miss, dist_tol)
+    else:
+        rospy.logerr('handtool_server: optimization returned a non finite solution')
+        return [IG_valve, pos_tool, np.identity(3), False]
+
     valve_dt = x[0]
     theta = x[1]
-    if not solution.success:
-        rospy.logerr('handtool_server: optimization failed: %s', solution.message)
-    if not np.all(np.isfinite(x)):
-        rospy.logerr('handtool_server: optimization returned a non finite solution')
-        return [valve_dt, pos_tool, np.identity(3), False]
-    # show final objective
-    print('Final SSE Objective: ' + str(objective(x, par)))
-    
+    dist = get_landing(m_obj, valve_dt, h, theta)
+
     # print solution
     print('Solution')
-    print('x1 = ' + str(x[0]))
-    print('x2 = ' + str(x[1]))
-    dist = get_landing(m_obj, valve_dt, h, theta)
-    print('distance: ' + str(dist))
+    print('valve_dt = ' + str(valve_dt) + ' s  (ref ' + str(valve_ref) + ')')
+    print('theta    = ' + str(theta) + ' rad  (ref ' + str(theta_ref) + ')')
+    print('distance : ' + str(dist) + '  (desired ' + str(dist_desired)
+          + ', miss ' + str(dist - dist_desired) + ')')
+    print('cost     : ' + str(obj))
 
     # get R from theta
 
@@ -144,7 +166,7 @@ def get_throwing_par(m_obj, target):
     angle_y = np.pi/2-theta
     R = np.linalg.multi_dot([R_z(angle_z), R_y(angle_y), R_z(np.pi/2),  R_y(-np.pi/2)]) #terna ventosa rispetto MegaPose
 
-    return [valve_dt, pos_tool, R, bool(solution.success)]
+    return [valve_dt, pos_tool, R, bool(success)]
 
 # ----- handtool server node ----- #
 def callback_throwing_par(req):
@@ -190,6 +212,13 @@ def handtool_server():
     global bound_theta
     global IG_valve
     global IG_theta
+    global valve_ref
+    global theta_ref
+    global w_valve
+    global w_theta
+    global valve_scale
+    global theta_scale
+    global dist_tol
     # - the module values are used as fallback, so a missing yaml does not kill the node - #
     dist_base = rospy.get_param('optimization/dist_base', dist_base)
     h_base = rospy.get_param('optimization/h_base', h_base)
@@ -207,8 +236,25 @@ def handtool_server():
     # - check the initial guesses lie inside the bounds, SLSQP would clip them silently - #
     IG_valve = min(max(IG_valve, bound_valve[0]), bound_valve[1])
     IG_theta = min(max(IG_theta, bound_theta[0]), bound_theta[1])
+    # - cost weights and references - #
+    valve_ref = rospy.get_param('optimization/valve_ref', valve_ref)
+    theta_ref_deg = rospy.get_param('optimization/theta_ref_deg', None)
+    if theta_ref_deg is not None:
+        theta_ref = np.deg2rad(theta_ref_deg)
+    w_valve = rospy.get_param('optimization/w_valve', w_valve)
+    w_theta = rospy.get_param('optimization/w_theta', w_theta)
+    valve_scale = rospy.get_param('optimization/valve_scale', valve_scale)
+    theta_scale = np.deg2rad(rospy.get_param('optimization/theta_scale_deg',
+                                             np.rad2deg(theta_scale)))
+    dist_tol = rospy.get_param('optimization/dist_tol', dist_tol)
+    # - the references must lie inside the bounds or the cost pulls against them - #
+    valve_ref = min(max(valve_ref, bound_valve[0]), bound_valve[1])
+    theta_ref = min(max(theta_ref, bound_theta[0]), bound_theta[1])
     rospy.loginfo('handtool_server: valve bounds [%f, %f] s, theta bounds [%f, %f] rad',
                   bound_valve[0], bound_valve[1], bound_theta[0], bound_theta[1])
+    rospy.loginfo('handtool_server: cost w_valve %g (ref %.4f s), w_theta %g (ref %.4f rad), '
+                  'distance is an equality constraint (tol %g m)',
+                  w_valve, valve_ref, w_theta, theta_ref, dist_tol)
 
     # - advertise the service only once the parameters are loaded - #
     s = rospy.Service('handtool_throw_service', throwing_par_srv, callback_throwing_par)

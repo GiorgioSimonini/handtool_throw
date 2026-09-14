@@ -8,11 +8,18 @@ Params:
   duty_cycle: 100
 
 optimization:
-  dist_base: 0.7        # [m] tool distance from the robot base
-  h_base: 0.5           # [m] tool height over the robot base
-  valve_0: 0.051        # [s] valve opening time with no throw (energy model offset)
-  g: 9.81               # [m/s^2]
-  IG_valve: 0.052       # [s] initial guess, clipped inside bound_valve
-  IG_theta: 0.0         # [rad] initial guess, clipped inside bound_theta_deg
+  dist_base: 0.7                # [m] tool distance from the robot base
+  h_base: 0.5                   # [m] tool height over the robot base
+  valve_0: 0.051                # [s] valve opening time with no throw (energy model offset)
+  g: 9.81                       # [m/s^2]
+  IG_valve: 0.052               # [s] initial guess, clipped inside bound_valve
+  IG_theta: 0.0                 # [rad] initial guess, clipped inside bound_theta_deg
   bound_valve: [0.051, 0.5]     # [s]
   bound_theta_deg: [0.0, 90.0]  # [deg], converted to rad by the node
+  valve_ref: 0.06               # [s] valve time we trust, the cost keeps the solution near it. Kept well clear of the pole in fun_energy: the landing point moves 3.3 cm per 100 us of valve jitter at 0.052, 0.2 cm at 0.06.
+  theta_ref_deg: 45.0           # [deg] preferred launch angle
+  w_valve: 1.0                  # weight on the normalised valve deviation (expensive)
+  w_theta: 0.01                 # weight on the normalised theta deviation (cheap, used first)
+  valve_scale: 0.001            # [s] normalisation of the valve deviation. NOT the bound range: the energy model has a pole just below valve_0, so its whole useful range is ~1 ms wide. Larger values make the valve look free and it takes over the aiming from theta.
+  theta_scale_deg: 45.0         # [deg] normalisation of the theta deviation
+  dist_tol: 0.001               # [m] a solution missing by more than this is reported as failed
