@@ -1,0 +1,8 @@
+<launch>
+	<arg name="dummy_qualisys_params" default="$(find handtool_throw)/configs/dummy_qualisys_params.yaml"/>
+
+	<rosparam command="load" file="$(arg dummy_qualisys_params)"/>
+	<!-- fake qualisys: publishes the target and the franka base poses set in the yaml -->
+	<node name="dummy_qualisys" pkg="handtool_throw" type="dummy_qualisys.py" output="screen"/>
+
+</launch>

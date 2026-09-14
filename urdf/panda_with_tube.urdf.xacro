@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ==========================================================================
+     Franka Panda + tube handtool.
+
+     Wraps the stock franka_description panda so that nothing inside the
+     franka_ros submodule has to be touched: it just includes the original
+     panda.urdf.xacro and bolts the tube on the flange.
+
+     All the args of the original panda.urdf.xacro (arm_id, hand, gazebo,
+     xyz, rpy, tcp_xyz, tcp_rpy, ...) are still accepted and simply forwarded.
+     ========================================================================== -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="panda">
+
+  <xacro:arg name="arm_id" default="panda" />
+
+  <!-- tube parameters -->
+  <xacro:arg name="tube"           default="true"/>
+  <xacro:arg name="tube_name"      default="tube" />
+  <xacro:arg name="tube_parent"    default="$(arg arm_id)_link8" />
+  <xacro:arg name="tube_xyz"       default="0 0 -0.05"/>
+  <xacro:arg name="tube_rpy"       default="0 0 0" />
+  <xacro:arg name="tube_length"    default="0.30" />
+  <xacro:arg name="tube_radius"    default="0.015" />
+  <xacro:arg name="tube_thickness" default="0.002" />
+  <xacro:arg name="tube_mass"      default="0.05" />
+  <xacro:arg name="gazebo"         default="false" />
+
+  <!-- the untouched franka robot -->
+  <xacro:include filename="$(find franka_description)/robots/panda/panda.urdf.xacro" />
+
+  <!-- the tube -->
+  <xacro:include filename="$(find handtool_throw)/urdf/tube.xacro" />
+
+  <xacro:if value="$(arg tube)">
+    <xacro:tube name="$(arg tube_name)"
+                connected_to="$(arg tube_parent)"
+                xyz="$(arg tube_xyz)"
+                rpy="$(arg tube_rpy)"
+                length="$(arg tube_length)"
+                radius="$(arg tube_radius)"
+                thickness="$(arg tube_thickness)"
+                mass="$(arg tube_mass)"
+                gazebo="$(arg gazebo)" />
+  </xacro:if>
+
+</robot>

@@ -56,6 +56,8 @@
   <build_depend>eigen</build_depend>
   <build_depend>message_generation</build_depend>
   <exec_depend>tf</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>franka_description</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-scipy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>

@@ -170,7 +170,9 @@ target_link_libraries(testing
 #   scripts/my_python_script
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
-catkin_install_python(PROGRAMS scripts/throwing_par.py
+catkin_install_python(PROGRAMS
+  scripts/throwing_par.py
+  scripts/dummy_qualisys.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

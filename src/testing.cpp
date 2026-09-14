@@ -71,14 +71,14 @@ int main(int argc, char **argv)
 	// Subscribers
 	ros::Subscriber sub_target = nh_.subscribe("/qualisys/box_target/pose", 1, &targetCallback);
 	ros::Subscriber sub_franka_base = nh_.subscribe("/qualisys/mpc_franka/pose", 1, &frankaBaseCallback);
-	ros::Subscriber sub_franka = nh_.subscribe("/backstepping/franka_pose", 1, &frankaCallback);
+	ros::Subscriber sub_franka = nh_.subscribe("/backstepping_controller/franka_pose", 1, &frankaCallback);
 
 	// Publishers
 	ros::Publisher pub_throw = nh_.advertise<std_msgs::Empty>("arduino/blowing_off", 1); 
 	ros::Publisher pub_suct = nh_.advertise<std_msgs::Empty>("arduino/suctioning", 1); 
 	ros::Publisher pub_reg = nh_.advertise<std_msgs::UInt8>("arduino/duty_cycle", 1); 
 	ros::Publisher pub_valve = nh_.advertise<std_msgs::UInt32>("arduino/valve", 1);
-	ros::Publisher pub_command = nh_.advertise<panda_controllers::desTrajEE>("/backstepping/command", 1);
+	ros::Publisher pub_command = nh_.advertise<panda_controllers::desTrajEE>("/backstepping_controller/command_cartesian", 1);
 	// handtool service
 	ros::ServiceClient handtool_client = nh_.serviceClient<handtool_throw::throwing_par_srv>("handtool_throw_service");
 	handtool_throw::throwing_par_srv srv;

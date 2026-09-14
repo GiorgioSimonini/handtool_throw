@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ==========================================================================
+     Tube (handtool) attached to the flange of a Franka Panda.
+
+     The tube axis is aligned with the +X axis of `connected_to` and the tube
+     frame is placed `xyz` (default 5 cm "under", i.e. -Z) w.r.t. `connected_to`.
+
+     Frames created:
+       ${name}       -> origin of the tube, X pointing along the tube axis
+       ${name}_tip   -> free end of the tube (${length} along X from ${name})
+     ========================================================================== -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="tube"
+               params="name:=tube
+                       connected_to:=panda_link8
+                       xyz:='0 0 -0.05'
+                       rpy:='0 0 0'
+                       length:=0.30
+                       radius:=0.015
+                       thickness:=0.002
+                       mass:=0.05
+                       gazebo:=false
+                       color:='0.2 0.2 0.2 1.0'">
+
+    <!-- hollow cylinder inertia about its center of mass -->
+    <xacro:property name="r_out" value="${radius}" />
+    <xacro:property name="r_in"  value="${max(radius - thickness, 0.0)}" />
+    <xacro:property name="i_zz"  value="${0.5 * mass * (r_out**2 + r_in**2)}" />
+    <xacro:property name="i_xx"  value="${1.0/12 * mass * (3 * (r_out**2 + r_in**2) + length**2)}" />
+
+    <!-- attach to the flange -->
+    <joint name="${name}_joint" type="fixed">
+      <origin xyz="${xyz}" rpy="${rpy}" />
+      <parent link="${connected_to}" />
+      <child  link="${name}" />
+    </joint>
+
+    <link name="${name}">
+      <!-- the cylinder primitive is built along Z, rotate it by +90 deg around Y
+           to make it point along +X, and shift it so that the link origin is at
+           the base of the tube -->
+      <visual>
+        <origin xyz="${length/2} 0 0" rpy="0 ${pi/2} 0" />
+        <geometry>
+          <cylinder radius="${radius}" length="${length}" />
+        </geometry>
+        <material name="${name}_material">
+          <color rgba="${color}" />
+        </material>
+      </visual>
+
+      <collision>
+        <origin xyz="${length/2} 0 0" rpy="0 ${pi/2} 0" />
+        <geometry>
+          <cylinder radius="${radius}" length="${length}" />
+        </geometry>
+      </collision>
+
+      <inertial>
+        <origin xyz="${length/2} 0 0" rpy="0 ${pi/2} 0" />
+        <mass value="${mass}" />
+        <inertia ixx="${i_xx}" ixy="0" ixz="0"
+                 iyy="${i_xx}" iyz="0"
+                 izz="${i_zz}" />
+      </inertial>
+    </link>
+
+    <!-- frame at the free end of the tube, handy as a task frame -->
+    <joint name="${name}_tip_joint" type="fixed">
+      <origin xyz="${length} 0 0" rpy="0 0 0" />
+      <parent link="${name}" />
+      <child  link="${name}_tip" />
+    </joint>
+    <link name="${name}_tip" />
+
+    <xacro:if value="${gazebo}">
+      <gazebo reference="${name}">
+        <material>Gazebo/DarkGrey</material>
+      </gazebo>
+    </xacro:if>
+
+  </xacro:macro>
+
+</robot>
