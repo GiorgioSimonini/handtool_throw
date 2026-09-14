@@ -17,7 +17,7 @@
   <xacro:arg name="tube"           default="true"/>
   <xacro:arg name="tube_name"      default="tube" />
   <xacro:arg name="tube_parent"    default="$(arg arm_id)_link8" />
-  <xacro:arg name="tube_xyz"       default="0 0 -0.05"/>
+  <xacro:arg name="tube_xyz"       default="0 0 0.01"/>
   <xacro:arg name="tube_rpy"       default="0 0 0" />
   <xacro:arg name="tube_length"    default="0.30" />
   <xacro:arg name="tube_radius"    default="0.015" />
