@@ -14,7 +14,7 @@
   <xacro:macro name="tube"
                params="name:=tube
                        connected_to:=panda_link8
-                       xyz:='0 0 -0.05'
+                       xyz:='0 0 0.01'
                        rpy:='0 0 0'
                        length:=0.30
                        radius:=0.015

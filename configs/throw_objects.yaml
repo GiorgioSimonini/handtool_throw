@@ -27,6 +27,10 @@ testing:
   move_time: 3.0                        # [s] default <-> approach <-> throwing pose
   approach_time: 1.5                    # [s] approach pose <-> grasping pose
 
+  # --- the trajectory ends before the controller has actually settled on the last
+  #     commanded pose: wait here, on the throwing pose, before blowing --- #
+  pre_throw_time: 1.0                   # [s] 0.0 throws as soon as the trajectory ends
+
   # --- objects, thrown one after the other, a key press separates them --- #
   # mass and grasp_pose are required, an entry missing one of them is skipped.
   # target is optional: without it the box measured by qualisys is used for that object.
@@ -35,12 +39,15 @@ testing:
       mass: 0.1                         # [kg]
       grasp_pose:                       # TO BE FILLED with the real grasping pose
         position: [0.0, 0.4, 0.0]       # [m]
-        rpy_deg: [180, -90.0, 0.0]        # [deg]
+        rpy_deg: [90.0, 90.0, 0.0]        # [deg]
+        # orientation: [0.0, 0.7071068, 0.0, 0.7071068]
       target: [4.0, 4.0, 0.0]           # [m] fixed target, qualisys is not needed
 
     - name: big_cube
       mass: 0.5                         # [kg]
       grasp_pose:                       # TO BE FILLED with the real grasping pose
         position: [0.0, 0.4, 0.0]       # [m]
-        rpy_deg: [180.0, -90.0, 0.0]        # [deg]
+        rpy_deg: [90.0, 90.0, 0.0]        # [deg]
+        # orientation: [0.0, 0.7071068, 0.0, 0.7071068]
       # no target here: this object is thrown at the box measured by qualisys
+

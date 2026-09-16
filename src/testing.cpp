@@ -67,6 +67,7 @@ bool has_default_pose = false;						// false: the yaml does not carry a valid on
 Eigen::Vector3d approach_offset(-0.1, 0.0, 0.0);	// [m] grasping pose -> approach pose, tip frame
 double move_time = 3.0;								// [s] duration of the long motions
 double approach_time = 1.5;							// [s] duration of the approach/retreat motions
+double pre_throw_time = 1.0;						// [s] settling time on the throwing pose, before the throw
 
 // --- one entry of the object list of the yaml --- //
 struct Object {
@@ -474,6 +475,9 @@ int main(int argc, char **argv)
 	if (!nh_.getParam("/testing/approach_time", approach_time)) {
 		ROS_WARN("Failed to get param");
 	}
+	if (!nh_.getParam("/testing/pre_throw_time", pre_throw_time)) {
+		ROS_WARN("Failed to get param");
+	}
 	// wait
 	ros::Duration(1.0).sleep();
 
@@ -618,9 +622,20 @@ int main(int argc, char **argv)
 				// - leave the grasping place before moving away - //
 				if (!moveToPose(pub_command, approach_pose, approach_time)) break;
 
+				// - pass through the default position: a single minimum jerk segment from
+				//   the grasping side to the throwing pose interpolates only the cartesian
+				//   pose, the arm is free to travel through odd configurations on the way.
+				//   The default pose is a known good waypoint between the two - //
+				cout<<"going back to the default position..."<<endl;
+				if (!moveToPose(pub_command, default_pose, move_time)) break;
+
 				// - move to the throwing pose - //
 				cout<<"going to the throwing pose..."<<endl;
 				if (!moveToPose(pub_command, throw_pose, move_time)) break;
+
+				// - the controller reaches the commanded pose with some delay, give it
+				//   the time to settle before letting the object go - //
+				ros::Duration(pre_throw_time).sleep();
 
 				// - throw - //
 				cout<<"throwing..."<<endl;
