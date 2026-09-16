@@ -17,12 +17,12 @@
   <xacro:arg name="tube"           default="true"/>
   <xacro:arg name="tube_name"      default="tube" />
   <xacro:arg name="tube_parent"    default="$(arg arm_id)_link8" />
-  <xacro:arg name="tube_xyz"       default="0 0 0.01"/>
+  <xacro:arg name="tube_xyz"       default="-0.22 0 0.02"/>
   <xacro:arg name="tube_rpy"       default="0 0 0" />
-  <xacro:arg name="tube_length"    default="0.30" />
+  <xacro:arg name="tube_length"    default="0.36" />
   <xacro:arg name="tube_radius"    default="0.015" />
   <xacro:arg name="tube_thickness" default="0.002" />
-  <xacro:arg name="tube_mass"      default="0.05" />
+  <xacro:arg name="tube_mass"      default="0.1" />
   <xacro:arg name="gazebo"         default="false" />
 
   <!-- the untouched franka robot -->

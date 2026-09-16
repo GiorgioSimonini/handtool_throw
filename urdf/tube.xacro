@@ -14,12 +14,12 @@
   <xacro:macro name="tube"
                params="name:=tube
                        connected_to:=panda_link8
-                       xyz:='0 0 0.01'
+                       xyz:='-0.22 0 0.02'
                        rpy:='0 0 0'
-                       length:=0.30
+                       length:=0.36
                        radius:=0.015
                        thickness:=0.002
-                       mass:=0.05
+                       mass:=0.1
                        gazebo:=false
                        color:='0.2 0.2 0.2 1.0'">
 
