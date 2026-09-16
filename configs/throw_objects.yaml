@@ -1,0 +1,46 @@
+# Objects sequence executed by the choice 7 of the testing node.
+#
+# Every pose is expressed in the ROBOT BASE frame (panda_link0), the same frame of
+# /backstepping_controller/franka_pose and of the pose returned by the throwing service.
+# An orientation can be written either as
+#   rpy_deg: [r, p, y]                  # [deg] extrinsic xyz angles, R = Rz*Ry*Rx
+#   orientation: [x, y, z, w]           # quaternion
+#
+# The parameters live in the 'testing' namespace, next to the ones of handtool_params.yaml.
+
+testing:
+
+  # --- pose the sequence starts from and comes back to after every throw --- #
+  # MUST be filled with a real robot pose: while this block stays commented out
+  # the choice 7 refuses to start.
+  default_pose:
+    position: [0.048633287602128004, 0.1412178874414463, 0.6399394548277276]         # [m]
+    orientation: [0.968804167006842, -0.24782510500648733, -0.0010411808990283364, -0.00034534191485663726]          # [quat]
+
+  # --- the object is reached from the approach pose, and left the same way --- #
+  # The offset is expressed in the TIP frame of the grasping pose, not in the base frame:
+  # approach_pose = grasp_pose * translation(approach_offset). -x moves the tool away
+  # from the object, so the approach and the retreat run along the tool axis.
+  approach_offset: [-0.1, 0.0, 0.0]     # [m] tip frame, keep it clear of the object
+
+  # --- durations of the minimum jerk motions --- #
+  move_time: 3.0                        # [s] default <-> approach <-> throwing pose
+  approach_time: 1.5                    # [s] approach pose <-> grasping pose
+
+  # --- objects, thrown one after the other, a key press separates them --- #
+  # mass and grasp_pose are required, an entry missing one of them is skipped.
+  # target is optional: without it the box measured by qualisys is used for that object.
+  objects:
+    - name: small_cube
+      mass: 0.1                         # [kg]
+      grasp_pose:                       # TO BE FILLED with the real grasping pose
+        position: [0.0, 0.4, 0.0]       # [m]
+        rpy_deg: [180, -90.0, 0.0]        # [deg]
+      target: [4.0, 4.0, 0.0]           # [m] fixed target, qualisys is not needed
+
+    - name: big_cube
+      mass: 0.5                         # [kg]
+      grasp_pose:                       # TO BE FILLED with the real grasping pose
+        position: [0.0, 0.4, 0.0]       # [m]
+        rpy_deg: [180.0, -90.0, 0.0]        # [deg]
+      # no target here: this object is thrown at the box measured by qualisys

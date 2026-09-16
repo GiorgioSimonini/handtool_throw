@@ -1,7 +1,10 @@
 <launch>	
 	<arg name="handtool_params" default="$(find handtool_throw)/configs/handtool_params.yaml"/>
+	<arg name="throw_objects" default="$(find handtool_throw)/configs/throw_objects.yaml"/>
 
 	<rosparam command="load" file="$(arg handtool_params)"/>
+	<!-- objects sequence of the choice 7, merged in the same 'testing' namespace -->
+	<rosparam command="load" file="$(arg throw_objects)"/>
 	<!-- Load main node -->
   	<node name="testing" pkg="handtool_throw" type="testing" output="screen"/>
 	<node name="throwing_par" pkg="handtool_throw" type="throwing_par.py" output="screen"/>	
