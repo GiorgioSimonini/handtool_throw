@@ -10,6 +10,7 @@ Params:
 optimization:
   dist_base: 0.7                # [m] tool distance from the robot base
   h_base: 0.5                   # [m] tool height over the robot base
+  throw_position: [0.3, -0.4, 0.35]   # position of the handtool tip
   valve_0: 0.051                # [s] valve opening time with no throw (energy model offset)
   g: 9.81                       # [m/s^2]
   IG_valve: 0.052               # [s] initial guess, clipped inside bound_valve

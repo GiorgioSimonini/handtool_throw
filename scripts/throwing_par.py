@@ -15,6 +15,7 @@ from geometry_msgs.msg import Pose, Point, Quaternion
 # --- global parameters, replaced by yaml --- #
 dist_base = 0.7 # plant distance from base
 h_base = 0.5	# tool height
+throw_position = [0.3, -0.4, 0.35] # throwing position
 valve_0 = 0.051
 g = 9.81
 bound_valve = (0.051, 0.3)
@@ -60,13 +61,22 @@ def R_z(angle):
     return R
 
 def get_target_info(target):
-    d_xy_target = target - np.array([0, 0, target[2]])
-    pos_tool = d_xy_target/np.linalg.norm(d_xy_target)*dist_base
-    pos_tool[2] = h_base
+    # d_xy_target = target - np.array([0, 0, target[2]])
+    # pos_tool = d_xy_target/np.linalg.norm(d_xy_target)*dist_base
+    # pos_tool[2] = h_base
 
-    dist = np.linalg.norm(d_xy_target) - dist_base
+    # dist = np.linalg.norm(d_xy_target) - dist_base
 
-    h = h_base - target[2]
+    # h = h_base - target[2]
+    # return [dist, h, pos_tool]
+
+    # new position:
+    global dist_base
+    d_xy_target = target - np.array([throw_position[0], throw_position[1], target[2]])
+    pos_tool = throw_position
+    dist = np.linalg.norm(d_xy_target)
+    dist_base = dist
+    h = throw_position[2] - target[2]
     return [dist, h, pos_tool]
 
 def check_target(m_obj, target):
@@ -206,6 +216,7 @@ def handtool_server():
     #     handtool_params = yaml.safe_load(file)
     global dist_base
     global h_base
+    global throw_position
     global valve_0
     global g
     global bound_valve
@@ -222,6 +233,7 @@ def handtool_server():
     # - the module values are used as fallback, so a missing yaml does not kill the node - #
     dist_base = rospy.get_param('optimization/dist_base', dist_base)
     h_base = rospy.get_param('optimization/h_base', h_base)
+    throw_position = rospy.get_param('optimization/throw_position', throw_position)
     valve_0 = rospy.get_param('optimization/valve_0', valve_0)
     g = rospy.get_param('optimization/g', g)
     bound_valve = rospy.get_param('optimization/bound_valve', bound_valve)

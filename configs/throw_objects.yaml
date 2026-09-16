@@ -14,8 +14,9 @@ testing:
   # MUST be filled with a real robot pose: while this block stays commented out
   # the choice 7 refuses to start.
   default_pose:
-    position: [0.048633287602128004, 0.1412178874414463, 0.6399394548277276]         # [m]
-    orientation: [0.968804167006842, -0.24782510500648733, -0.0010411808990283364, -0.00034534191485663726]          # [quat]
+    position: [0.3, -0.4, 0.35]         # [m]
+    orientation: [1.0, 0.0, 0.0, 0.0]          # [quat]
+
 
   # --- the object is reached from the approach pose, and left the same way --- #
   # The offset is expressed in the TIP frame of the grasping pose, not in the base frame:
@@ -31,23 +32,24 @@ testing:
   #     commanded pose: wait here, on the throwing pose, before blowing --- #
   pre_throw_time: 1.0                   # [s] 0.0 throws as soon as the trajectory ends
 
+
   # --- objects, thrown one after the other, a key press separates them --- #
   # mass and grasp_pose are required, an entry missing one of them is skipped.
   # target is optional: without it the box measured by qualisys is used for that object.
   objects:
     - name: small_cube
       mass: 0.1                         # [kg]
-      grasp_pose:                       # TO BE FILLED with the real grasping pose
-        position: [0.0, 0.4, 0.0]       # [m]
-        rpy_deg: [90.0, 90.0, 0.0]        # [deg]
-        # orientation: [0.0, 0.7071068, 0.0, 0.7071068]
+      grasp_pose:                       # object grasp pose
+        position: [0.53, 0.0, 0.1]       # [m]
+        # rpy_deg: [90.0, 90.0, 0.0]        # [deg]
+        orientation: [0.5, 0.5, -0.5, 0.5]
       target: [4.0, 4.0, 0.0]           # [m] fixed target, qualisys is not needed
 
     - name: big_cube
       mass: 0.5                         # [kg]
-      grasp_pose:                       # TO BE FILLED with the real grasping pose
-        position: [0.0, 0.4, 0.0]       # [m]
-        rpy_deg: [90.0, 90.0, 0.0]        # [deg]
-        # orientation: [0.0, 0.7071068, 0.0, 0.7071068]
+      grasp_pose:                       # object grasp pose
+        position: [0.53, 0.0, 0.1]       # [m]
+        # rpy_deg: [90.0, 90.0, 0.0]        # [deg]
+        orientation: [0.5, 0.5, -0.5, 0.5]
       # no target here: this object is thrown at the box measured by qualisys
 
