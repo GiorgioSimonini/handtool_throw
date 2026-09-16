@@ -14,7 +14,8 @@ target_topic = '/qualisys/box_target/pose'
 franka_base_position = [0.0, 0.0, 0.0]          # [m] robot base in the mocap frame
 franka_base_rpy_deg = [0.0, 0.0, 0.0]           # [deg]
 target_position = [1.5, 0.0, 0.0]               # [m] target box in the mocap frame
-dist_base = 0.5                                 # [m] mirrors optimization/dist_base
+throw_position = [0.3, -0.4, 0.35]              # [m] mirrors optimization/throw_position
+dist_min = 0.05                                 # [m] mirrors optimization/dist_min
 
 
 # ----- functions ----- #
@@ -54,8 +55,9 @@ def dummy_qualisys():
     franka_base_position = rospy.get_param('dummy_qualisys/franka_base/position', franka_base_position)
     franka_base_rpy_deg = rospy.get_param('dummy_qualisys/franka_base/rpy_deg', franka_base_rpy_deg)
     target_position = rospy.get_param('dummy_qualisys/target/position', target_position)
-    # dist_base is owned by the optimization node, it is read here only to warn early
-    dist_base_par = rospy.get_param('optimization/dist_base', dist_base)
+    # the throwing point is owned by the optimization node, read here only to warn early
+    throw_position_par = rospy.get_param('optimization/throw_position', throw_position)
+    dist_min_par = rospy.get_param('optimization/dist_min', dist_min)
 
     # - the poses are constant, build the messages once - #
     R_base = rot.from_euler('xyz', np.deg2rad(franka_base_rpy_deg)).as_matrix()
@@ -73,11 +75,13 @@ def dummy_qualisys():
     rospy.loginfo('dummy_qualisys: target at [%.3f, %.3f, %.3f] m in the franka base frame',
                   target_base[0], target_base[1], target_base[2])
 
-    # - the optimization rejects a target closer than dist_base, warn instead of failing later - #
-    dist_xy = np.linalg.norm(target_base[0:2])
-    if dist_xy <= dist_base_par:
-        rospy.logwarn('dummy_qualisys: target xy distance (%.3f m) is not greater than dist_base (%.3f m), '
-                      'the throwing parameters service will reject it', dist_xy, dist_base_par)
+    # - the optimization rejects a target too close to the throwing point, warn instead
+    #   of failing later. The distance is measured from there, not from the base - #
+    dist_xy = np.linalg.norm(target_base[0:2] - np.asarray(throw_position_par[0:2]))
+    if dist_xy <= dist_min_par:
+        rospy.logwarn('dummy_qualisys: target is %.3f m from the throwing point in the horizontal '
+                      'plane, less than dist_min (%.3f m), the throwing parameters service will '
+                      'reject it', dist_xy, dist_min_par)
 
     pub_franka_base = rospy.Publisher(franka_base_topic, PoseStamped, queue_size=1)
     pub_target = rospy.Publisher(target_topic, PoseStamped, queue_size=1)

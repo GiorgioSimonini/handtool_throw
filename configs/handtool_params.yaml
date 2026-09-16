@@ -4,13 +4,24 @@ testing:
   valve_us: 50000
   duty_regulator: 255
 
+  # --- reference orientation of the tool at the throw, robot base frame --- #
+  # It must hold the tube HORIZONTAL and pointing along the base +x: the testing node
+  # tilts it up by the launch angle theta returned by the service, then turns it to the
+  # azimuth measured from optimization/throw_position to the target, as
+  #   R_throw = Rz(azimuth) * Ry(-theta) * throw_orientation
+  # So this parameter only decides the roll of the tool around the tube, that is which
+  # side the flange stays on while aiming: it does NOT change where the object lands.
+  # Written as rpy_deg [r, p, y] or as orientation [x, y, z, w], like every other pose.
+  throw_orientation:
+    orientation: [1.0, 0.0, 0.0, 0.0]   # [x,y,z,w] tube along +x, flange above the tube
+    # rpy_deg: [90.0, 0.0, 0.0]         # flange on the left, what the service hard-coded
+
 Params:
   duty_cycle: 100
 
 optimization:
-  dist_base: 0.7                # [m] tool distance from the robot base
-  h_base: 0.5                   # [m] tool height over the robot base
-  throw_position: [0.3, -0.4, 0.35]   # position of the handtool tip
+  throw_position: [0.3, -0.4, 0.35]   # [m] handtool tip, the fixed point the object leaves from
+  dist_min: 0.05                # [m] a target closer than this to throw_position (horizontally) is rejected: no throwing direction
   valve_0: 0.051                # [s] valve opening time with no throw (energy model offset)
   g: 9.81                       # [m/s^2]
   IG_valve: 0.052               # [s] initial guess, clipped inside bound_valve

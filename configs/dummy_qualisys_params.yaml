@@ -9,4 +9,4 @@ dummy_qualisys:
     rpy_deg: [0.0, 0.0, 0.0]        # [deg]
 
   target:                           # target box position in the mocap frame
-    position: [3.0, 0.0, 0.0]       # [m], xy distance from the base must exceed dist_base
+    position: [3.0, 0.0, 0.0]       # [m], must be farther than dist_min from optimization/throw_position

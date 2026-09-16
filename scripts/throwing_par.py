@@ -13,9 +13,8 @@ from std_msgs.msg import UInt32
 from geometry_msgs.msg import Pose, Point, Quaternion
 
 # --- global parameters, replaced by yaml --- #
-dist_base = 0.7 # plant distance from base
-h_base = 0.5	# tool height
-throw_position = [0.3, -0.4, 0.35] # throwing position
+throw_position = [0.3, -0.4, 0.35] # [m] fixed point the object is thrown from
+dist_min = 0.05 # [m] a target closer than this to the throwing point has no throwing direction
 valve_0 = 0.051
 g = 9.81
 bound_valve = (0.051, 0.3)
@@ -61,21 +60,11 @@ def R_z(angle):
     return R
 
 def get_target_info(target):
-    # d_xy_target = target - np.array([0, 0, target[2]])
-    # pos_tool = d_xy_target/np.linalg.norm(d_xy_target)*dist_base
-    # pos_tool[2] = h_base
-
-    # dist = np.linalg.norm(d_xy_target) - dist_base
-
-    # h = h_base - target[2]
-    # return [dist, h, pos_tool]
-
-    # new position:
-    global dist_base
+    # - the object always leaves from throw_position: the throw has to cover the
+    #   horizontal distance to the target, falling by h on the way - #
     d_xy_target = target - np.array([throw_position[0], throw_position[1], target[2]])
-    pos_tool = throw_position
+    pos_tool = np.asarray(throw_position, dtype=float)
     dist = np.linalg.norm(d_xy_target)
-    dist_base = dist
     h = throw_position[2] - target[2]
     return [dist, h, pos_tool]
 
@@ -85,11 +74,13 @@ def check_target(m_obj, target):
         return 'target is not finite'
     if (not np.isfinite(m_obj)) or (m_obj <= 0.0):
         return 'object mass must be positive, got {}'.format(m_obj)
-    dist_xy = np.linalg.norm(target[0:2])
-    if dist_xy <= dist_base:
-        # tool stands at dist_base from the base, on the base-target direction:
-        # a closer target has no throwing distance and a null one has no direction
-        return 'target xy distance ({:.3f} m) must be greater than dist_base ({:.3f} m)'.format(dist_xy, dist_base)
+    # the throw leaves from throw_position, so the distance that matters is measured
+    # from there: a target on the vertical of the throwing point has no throwing
+    # direction and its aiming azimuth would be undefined
+    dist_xy = np.linalg.norm(np.asarray(target[0:2]) - np.asarray(throw_position[0:2]))
+    if dist_xy <= dist_min:
+        return ('target is {:.3f} m from the throwing point in the horizontal plane, '
+                'at least {:.3f} m are needed').format(dist_xy, dist_min)
     return ''
 
 def get_landing(m_obj, valve_dt, h, theta):
@@ -150,7 +141,7 @@ def get_throwing_par(m_obj, target):
                      miss, dist_tol)
     else:
         rospy.logerr('handtool_server: optimization returned a non finite solution')
-        return [IG_valve, pos_tool, np.identity(3), False]
+        return [IG_valve, 0.0, pos_tool, np.identity(3), False]
 
     valve_dt = x[0]
     theta = x[1]
@@ -176,7 +167,7 @@ def get_throwing_par(m_obj, target):
     angle_y = np.pi/2-theta
     R = np.linalg.multi_dot([R_z(angle_z), R_y(angle_y), R_z(np.pi/2),  R_y(-np.pi/2)]) #terna ventosa rispetto MegaPose
 
-    return [valve_dt, pos_tool, R, bool(success)]
+    return [valve_dt, theta, pos_tool, R, bool(success)]
 
 # ----- handtool server node ----- #
 def callback_throwing_par(req):
@@ -188,7 +179,7 @@ def callback_throwing_par(req):
         rospy.logerr('handtool_server: rejected request, %s', error)
         return throwing_par_srvResponse(answer = False)
     try:
-        [valve_dt, pos_tool, R, success] = get_throwing_par(m_obj, target)
+        [valve_dt, theta, pos_tool, R, success] = get_throwing_par(m_obj, target)
     except (ValueError, ZeroDivisionError, FloatingPointError) as e:
         rospy.logerr('handtool_server: throwing parameters computation failed: %s', e)
         return throwing_par_srvResponse(answer = False)
@@ -207,16 +198,18 @@ def callback_throwing_par(req):
     pose.orientation.y = quat[1]
     pose.orientation.z = quat[2]
     pose.orientation.w = quat[3]
-    return throwing_par_srvResponse(result_valve_us = valve_us, result_pose = pose, answer = True)
+    # result_theta is the launch angle over the horizon: the testing node builds the
+    # tool orientation from it, the aiming azimuth and its reference orientation
+    return throwing_par_srvResponse(result_valve_us = valve_us, result_pose = pose,
+                                    result_theta = theta, answer = True)
 
 def handtool_server():
     rospy.init_node('handtool_server')
     # get parameters from yaml
     # with open('../config/handtool_parameters.yaml', 'r') as file:
     #     handtool_params = yaml.safe_load(file)
-    global dist_base
-    global h_base
     global throw_position
+    global dist_min
     global valve_0
     global g
     global bound_valve
@@ -231,9 +224,8 @@ def handtool_server():
     global theta_scale
     global dist_tol
     # - the module values are used as fallback, so a missing yaml does not kill the node - #
-    dist_base = rospy.get_param('optimization/dist_base', dist_base)
-    h_base = rospy.get_param('optimization/h_base', h_base)
     throw_position = rospy.get_param('optimization/throw_position', throw_position)
+    dist_min = rospy.get_param('optimization/dist_min', dist_min)
     valve_0 = rospy.get_param('optimization/valve_0', valve_0)
     g = rospy.get_param('optimization/g', g)
     bound_valve = rospy.get_param('optimization/bound_valve', bound_valve)
