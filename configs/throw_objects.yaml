@@ -1,7 +1,9 @@
 # Objects sequence executed by the choice 7 of the testing node.
 #
 # Every pose is expressed in the ROBOT BASE frame (panda_link0), the same frame of
-# /backstepping_controller/franka_pose and of the pose returned by the throwing service.
+# /backstepping_controller/franka_pose and of testing/throw_pose. Targets included:
+# the testing node is the one that measures them from the throwing point before
+# asking the optimization service, which works in that relative frame only.
 # An orientation can be written either as
 #   rpy_deg: [r, p, y]                  # [deg] extrinsic xyz angles, R = Rz*Ry*Rx
 #   orientation: [x, y, z, w]           # quaternion
@@ -46,7 +48,7 @@ testing:
       target: [3.0, 0.0, -0.94]           # [m] fixed target, qualisys is not needed
 
     - name: big_cube
-      mass: 0.5                         # [kg]
+      mass: 0.4                         # [kg]
       grasp_pose:                       # object grasp pose
         position: [0.55, 0.0, 0.2]       # [m]
         # rpy_deg: [90.0, 90.0, 0.0]        # [deg]

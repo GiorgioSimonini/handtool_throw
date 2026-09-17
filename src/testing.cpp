@@ -69,12 +69,15 @@ double move_time = 3.0;								// [s] duration of the long motions
 double approach_time = 1.5;							// [s] duration of the approach/retreat motions
 double pre_throw_time = 1.0;						// [s] settling time on the throwing pose, before the throw
 
-// --- reference orientation of the tool at the throw: the tube horizontal, pointing
-//     along the base +x, with the roll (flange side) the throw has to keep. The aiming
-//     azimuth and the launch angle are applied on top of it, see getThrowingPar().
-//     The default is the orientation the throwing service used to hard-code --- //
-Eigen::Matrix3d throw_orientation = Eigen::Matrix3d(
-	Eigen::AngleAxisd(M_PI/2.0, Eigen::Vector3d::UnitX()));
+// --- pose the object is thrown from, '/testing/throw_pose'. THIS NODE OWNS THE
+//     THROWING POINT: the parameters service solves a planar problem around the
+//     origin, so the position below is subtracted from the target before asking and
+//     added back to build the robot pose. The orientation is the reference the tube
+//     starts from, the tube horizontal along the base +x with the roll (flange side)
+//     the throw has to keep: the aiming azimuth and the launch angle are applied on
+//     top of it, see getThrowingPar(). The defaults are the ones the throwing service
+//     used to hard-code --- //
+Eigen::Affine3d throw_pose;
 
 // --- one entry of the object list of the yaml --- //
 struct Object {
@@ -283,6 +286,7 @@ bool moveToPose(ros::Publisher &pub_command, const Eigen::Affine3d &pose_d, doub
 	}
 	// frozen copy: the callbacks are not served during the trajectory cycle
 	const Eigen::Affine3d pose_start = firstTime ? franka_pose : franka_pose_d;
+	// firstTime = false;
 
 	// - declarations - //
 	Eigen::VectorXd pos_start(3), pos_end(3), theta_start(1), theta_end(1);
@@ -361,14 +365,23 @@ bool moveToPose(ros::Publisher &pub_command, const Eigen::Affine3d &pose_d, doub
 	return ros::ok();
 }
 
-// --- asks the service for the valve time and the throwing pose of one throw --- //
+// --- asks the service for the valve time and the launch angle of one throw, and
+//     turns them into the robot pose to throw from.
+//     target_req is in the ROBOT BASE frame, the service wants it measured from the
+//     throwing point: this is the only place where the two frames meet --- //
 bool getThrowingPar(ros::ServiceClient &handtool_client, double m_obj,
 					const geometry_msgs::Point &target_req,
 					int &valve_us_out, Eigen::Affine3d &pose_d_out)
 {
+	// - the throw leaves from throw_pose, everything the service sees is relative to it - //
+	Eigen::Vector3d target_rel = Eigen::Vector3d(target_req.x, target_req.y, target_req.z)
+								- throw_pose.translation();
+
 	handtool_throw::throwing_par_srv srv;
 	srv.request.m_obj = m_obj;
-	srv.request.target = target_req;
+	srv.request.target.x = target_rel(0);
+	srv.request.target.y = target_rel(1);
+	srv.request.target.z = target_rel(2);
 	if (!handtool_client.call(srv)){
 		ROS_ERROR("Failed to call throw parameters service");
 		return false;
@@ -379,36 +392,34 @@ bool getThrowingPar(ros::ServiceClient &handtool_client, double m_obj,
 	}
 
 	valve_us_out = srv.response.result_valve_us;
-	// the service owns the throwing point (optimization/throw_position) and the physics:
-	// it answers with the position to throw from and the launch angle over the horizon
-	geometry_msgs::Point throw_point = srv.response.result_pose.position;
+	// the service owns the physics only: it answers with the valve time and the launch
+	// angle over the horizon, the aiming azimuth is ours and comes from the same vector
 	double theta = srv.response.result_theta;
-
-	// - the tool has to point at the target: the azimuth is measured in the horizontal
-	//   plane FROM THE THROWING POINT, not from the robot base - //
-	double azimuth = atan2(target_req.y - throw_point.y, target_req.x - throw_point.x);
+	double azimuth = atan2(target_rel(1), target_rel(0));
 
 	// - aim = reference orientation, tilted up by theta, then turned to the azimuth.
-	//   throw_orientation holds the tube horizontal along +x, so it only decides the roll
+	//   throw_pose.linear() holds the tube horizontal along +x, so it only decides the roll
 	//   of the tool (which side the flange stays on) and is left untouched by the aiming - //
 	Eigen::Matrix3d aim = Eigen::Matrix3d(Eigen::AngleAxisd(azimuth, Eigen::Vector3d::UnitZ()))
 						* Eigen::Matrix3d(Eigen::AngleAxisd(-theta, Eigen::Vector3d::UnitY()))
-						* throw_orientation;
+						* throw_pose.linear();
 
 	pose_d_out.setIdentity();
-	pose_d_out.translation() = Eigen::Vector3d(throw_point.x, throw_point.y, throw_point.z);
+	pose_d_out.translation() = throw_pose.translation();
 	pose_d_out.linear() = aim;
 
 	Eigen::Quaterniond quat(aim);
 	std::cout << "Valve time in us:" << valve_us_out << std::endl;
 	std::cout << "Aim:" << std::endl;
+	std::cout << "  target from the throwing point [m]: [" << target_rel(0) << ", "
+		<< target_rel(1) << ", " << target_rel(2) << "]" << std::endl;
 	std::cout << "  theta   [deg]: " << theta*180.0/M_PI << std::endl;
 	std::cout << "  azimuth [deg]: " << azimuth*180.0/M_PI << std::endl;
 	std::cout << "  tube direction: [" << aim(0,0) << ", " << aim(1,0) << ", " << aim(2,0) << "]" << std::endl;
 	std::cout << "Position:" << std::endl;
-	std::cout << "  x: " << throw_point.x << std::endl;
-	std::cout << "  y: " << throw_point.y << std::endl;
-	std::cout << "  z: " << throw_point.z << std::endl;
+	std::cout << "  x: " << pose_d_out.translation()(0) << std::endl;
+	std::cout << "  y: " << pose_d_out.translation()(1) << std::endl;
+	std::cout << "  z: " << pose_d_out.translation()(2) << std::endl;
 	std::cout << "Orientation:" << std::endl;
 	std::cout << "  x: " << quat.x() << std::endl;
 	std::cout << "  y: " << quat.y() << std::endl;
@@ -455,6 +466,10 @@ int main(int argc, char **argv)
 	franka_pose.setIdentity();
 	franka_pose_d.setIdentity();
 	default_pose.setIdentity();
+	// the throwing pose the service used to hard-code, replaced by '/testing/throw_pose'
+	throw_pose.setIdentity();
+	throw_pose.translation() = Eigen::Vector3d(0.3, -0.4, 0.35);
+	throw_pose.linear() = Eigen::Matrix3d(Eigen::AngleAxisd(M_PI/2.0, Eigen::Vector3d::UnitX()));
 
 	// Subscribers
 	ros::Subscriber sub_target = nh_.subscribe("/qualisys/box_target/pose", 1, &targetCallback);
@@ -507,23 +522,22 @@ int main(int argc, char **argv)
 	if (!nh_.getParam("/testing/pre_throw_time", pre_throw_time)) {
 		ROS_WARN("Failed to get param");
 	}
-	// - reference orientation of the throw, the built in one is kept if the yaml has none - //
-	XmlRpc::XmlRpcValue throw_orientation_par;
-	Eigen::Quaterniond throw_quat;
-	if (!nh_.getParam("/testing/throw_orientation", throw_orientation_par)){
-		ROS_WARN("Failed to get param '/testing/throw_orientation', using the default");
-	}else if (!getQuaternion(throw_orientation_par, throw_quat)){
-		ROS_WARN("Malformed param '/testing/throw_orientation', using the default");
-	}else{
-		throw_orientation = throw_quat.toRotationMatrix();
+	// - pose the object is thrown from, the built in one is kept if the yaml has none - //
+	XmlRpc::XmlRpcValue throw_pose_par;
+	if (!nh_.getParam("/testing/throw_pose", throw_pose_par)){
+		ROS_WARN("Failed to get param '/testing/throw_pose', using the default");
+	}else if (!getPose(throw_pose_par, throw_pose)){
+		ROS_WARN("Malformed param '/testing/throw_pose', using the default");
 	}
-	// - the aiming is R_throw = Rz(azimuth)*Ry(-theta)*throw_orientation, it points the tube
-	//   at the target only if the reference keeps the tube horizontal along the base +x - //
-	Eigen::Vector3d ref_tube = throw_orientation * Eigen::Vector3d::UnitX();
+	ROS_INFO("throwing from [%.3f, %.3f, %.3f] m, every target is measured from there",
+		throw_pose.translation()(0), throw_pose.translation()(1), throw_pose.translation()(2));
+	// - the aiming is R_throw = Rz(azimuth)*Ry(-theta)*throw_pose.orientation, it points the
+	//   tube at the target only if the reference keeps the tube horizontal along the base +x - //
+	Eigen::Vector3d ref_tube = throw_pose.linear() * Eigen::Vector3d::UnitX();
 	if ((ref_tube - Eigen::Vector3d::UnitX()).norm() > 1e-3){
-		ROS_WARN("'/testing/throw_orientation' puts the tube along [%.3f, %.3f, %.3f] instead of "
-			"[1, 0, 0]: the throws will NOT aim at the target. It must keep the tube horizontal "
-			"along the base +x, it only decides the roll around the tube axis",
+		ROS_WARN("the orientation of '/testing/throw_pose' puts the tube along [%.3f, %.3f, %.3f] "
+			"instead of [1, 0, 0]: the throws will NOT aim at the target. It must keep the tube "
+			"horizontal along the base +x, it only decides the roll around the tube axis",
 			ref_tube(0), ref_tube(1), ref_tube(2));
 	}
 	// wait

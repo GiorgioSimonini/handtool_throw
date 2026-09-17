@@ -172,6 +172,8 @@ target_link_libraries(testing
 # )
 catkin_install_python(PROGRAMS
   scripts/throwing_par.py
+  scripts/throwing_model.py
+  scripts/throwing_check.py
   scripts/dummy_qualisys.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

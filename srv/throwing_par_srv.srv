@@ -1,7 +1,14 @@
+# Parameters of one throw. The service solves a planar ballistic problem only: it
+# knows nothing about where the tool is, the caller places the throw.
+#
+# target is the vector FROM THE THROWING POINT to the target, with the axes of the
+# robot base (x forward, y left, z up). The caller owns the throwing pose and is
+# the one that subtracts it, see '/testing/throw_pose'.
 float32 m_obj
 geometry_msgs/Point target
 ---
+# valve opening time and launch angle over the horizon. The aiming azimuth is not
+# answered: it is atan2(target.y, target.x) of the request, the caller already has it.
 uint32 result_valve_us
-geometry_msgs/Pose result_pose
 float32 result_theta
 bool answer

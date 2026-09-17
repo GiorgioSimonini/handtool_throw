@@ -4,31 +4,55 @@ testing:
   valve_us: 50000
   duty_regulator: 255
 
-  # --- reference orientation of the tool at the throw, robot base frame --- #
-  # It must hold the tube HORIZONTAL and pointing along the base +x: the testing node
-  # tilts it up by the launch angle theta returned by the service, then turns it to the
-  # azimuth measured from optimization/throw_position to the target, as
-  #   R_throw = Rz(azimuth) * Ry(-theta) * throw_orientation
-  # So this parameter only decides the roll of the tool around the tube, that is which
-  # side the flange stays on while aiming: it does NOT change where the object lands.
+  # --- pose the object is thrown from, robot base frame --- #
+  # THE THROWING POINT LIVES HERE AND NOWHERE ELSE: the optimization service solves a
+  # planar problem around the origin, this node is the one that subtracts the position
+  # below from the target before asking, and that turns the answer into a robot pose.
+  #
+  # position    the handtool tip at the release, the fixed point the object leaves from.
+  # orientation the reference orientation of the tool. It must hold the tube HORIZONTAL
+  #             and pointing along the base +x: the launch angle theta answered by the
+  #             service tilts it up and the aiming azimuth turns it, as
+  #               R_throw = Rz(azimuth) * Ry(-theta) * throw_pose.orientation
+  #             so it only decides the roll of the tool around the tube, that is which
+  #             side the flange stays on while aiming: it does NOT move the landing point.
   # Written as rpy_deg [r, p, y] or as orientation [x, y, z, w], like every other pose.
-  throw_orientation:
+  throw_pose:
+    position: [0.3, -0.4, 0.35]         # [m]
     orientation: [1.0, 0.0, 0.0, 0.0]   # [x,y,z,w] tube along +x, flange above the tube
     # rpy_deg: [90.0, 0.0, 0.0]         # flange on the left, what the service hard-coded
 
-Params:
-  duty_cycle: 100
-
+# --- the throwing parameters service --- #
+# It solves a PLANAR problem: the throwing point is the origin, the target arrives
+# already measured from there and the answer is a valve time and a launch angle.
+# Nothing in this block knows where the tool is, that is testing/throw_pose above.
 optimization:
-  throw_position: [0.3, -0.4, 0.35]   # [m] handtool tip, the fixed point the object leaves from
-  dist_min: 0.05                # [m] a target closer than this to throw_position (horizontally) is rejected: no throwing direction
+  dist_min: 0.05                # [m] a target closer than this to the throwing point (horizontally) is rejected: no throwing direction
   valve_0: 0.051                # [s] valve opening time with no throw (energy model offset)
   g: 9.81                       # [m/s^2]
-  IG_valve: 0.052               # [s] initial guess, clipped inside bound_valve
-  IG_theta: 0.0                 # [rad] initial guess, clipped inside bound_theta_deg
-  bound_valve: [0.051, 0.5]     # [s]
+  bound_valve: [0.0511, 0.5]    # [s] the lower bound must stay OFF valve_0: on it the throw has no energy and the log model has an infinite slope
   bound_theta_deg: [0.0, 90.0]  # [deg], converted to rad by the node
-  valve_ref: 0.06               # [s] valve time we trust, the cost keeps the solution near it. Kept well clear of the pole in fun_energy: the landing point moves 3.3 cm per 100 us of valve jitter at 0.052, 0.2 cm at 0.06.
+
+  # --- identified energy model: E(t) = a1*log_b(a2*t + a3) - E(valve_0) --- #
+  energy_a1: 2.0
+  energy_a2: 1.0
+  energy_a3: -0.05092
+  energy_b: 20.0
+
+  # --- what the optimizer is allowed to move --- #
+  # Any subset of [valve, theta]. A variable left out is FROZEN at its own *_ref,
+  # so 'free_vars: [theta]' aims with the angle only, 'free_vars: [valve]' aims with
+  # the valve time only at theta_ref, and both together let the cost trade them.
+  free_vars: [valve, theta]
+  # Which side of the ballistic apex the solution may sit on. For every reachable
+  # distance below the maximum range there are TWO launch angles: a flat one below
+  # the angle of maximum range and a lob above it.
+  #   low   flat throw, shortest flight, least sensitive to a theta error  <- use this
+  #   high  lob, the tube points almost up for a close target
+  #   any   whichever of the two the cost happens to like (the old behaviour)
+  branch: low
+  n_starts: 5                   # multi start grid points per free variable
+  valve_ref: 0.06               # [s] valve time we trust, the cost keeps the solution near it. Kept well clear of the pole of the energy model: the landing point moves 3.3 cm per 100 us of valve jitter at 0.052, 0.2 cm at 0.06.
   theta_ref_deg: 45.0           # [deg] preferred launch angle
   w_valve: 1.0                  # weight on the normalised valve deviation (expensive)
   w_theta: 0.01                 # weight on the normalised theta deviation (cheap, used first)

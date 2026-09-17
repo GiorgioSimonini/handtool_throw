@@ -14,7 +14,7 @@ target_topic = '/qualisys/box_target/pose'
 franka_base_position = [0.0, 0.0, 0.0]          # [m] robot base in the mocap frame
 franka_base_rpy_deg = [0.0, 0.0, 0.0]           # [deg]
 target_position = [1.5, 0.0, 0.0]               # [m] target box in the mocap frame
-throw_position = [0.3, -0.4, 0.35]              # [m] mirrors optimization/throw_position
+throw_position = [0.3, -0.4, 0.35]              # [m] mirrors testing/throw_pose position
 dist_min = 0.05                                 # [m] mirrors optimization/dist_min
 
 
@@ -55,8 +55,8 @@ def dummy_qualisys():
     franka_base_position = rospy.get_param('dummy_qualisys/franka_base/position', franka_base_position)
     franka_base_rpy_deg = rospy.get_param('dummy_qualisys/franka_base/rpy_deg', franka_base_rpy_deg)
     target_position = rospy.get_param('dummy_qualisys/target/position', target_position)
-    # the throwing point is owned by the optimization node, read here only to warn early
-    throw_position_par = rospy.get_param('optimization/throw_position', throw_position)
+    # the throwing point is owned by the testing node, read here only to warn early
+    throw_position_par = rospy.get_param('testing/throw_pose/position', throw_position)
     dist_min_par = rospy.get_param('optimization/dist_min', dist_min)
 
     # - the poses are constant, build the messages once - #
