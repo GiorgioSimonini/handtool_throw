@@ -272,6 +272,7 @@ bool waitForPoses(bool need_target)
 // --- minimum jerk cartesian motion, from the measured pose to pose_d in T seconds --- //
 bool moveToPose(ros::Publisher &pub_command, const Eigen::Affine3d &pose_d, double T)
 {
+	static bool firstTime = true;
 	if (T <= 0.0){
 		ROS_ERROR("motion duration must be positive, got %f s", T);
 		return false;
@@ -281,7 +282,7 @@ bool moveToPose(ros::Publisher &pub_command, const Eigen::Affine3d &pose_d, doub
 		return false;
 	}
 	// frozen copy: the callbacks are not served during the trajectory cycle
-	const Eigen::Affine3d pose_start = franka_pose;
+	const Eigen::Affine3d pose_start = firstTime ? franka_pose : franka_pose_d;
 
 	// - declarations - //
 	Eigen::VectorXd pos_start(3), pos_end(3), theta_start(1), theta_end(1);
