@@ -39,19 +39,49 @@ testing:
   # mass and grasp_pose are required, an entry missing one of them is skipped.
   # target is optional: without it the box measured by qualisys is used for that object.
   objects:
-    - name: small_cube
-      mass: 0.1                         # [kg]
+    # - name: tortino005
+    #   mass: 0.05                         # [kg]
+    #   grasp_pose:                       # object grasp pose
+    #     position: [0.55, 0.0, 0.2]       # [m]
+    #     # rpy_deg: [90.0, 90.0, 0.0]        # [deg]
+    #     orientation: [0.5, 0.5, -0.5, 0.5]
+    #   target: [6.0, 1.7, 0.0]           # [m] fixed target, qualisys is not needed
+    # - name: tortino01
+    #   mass: 0.1                         # [kg]
+    #   grasp_pose:                       # object grasp pose
+    #     position: [0.55, 0.0, 0.2]       # [m]
+    #     # rpy_deg: [90.0, 90.0, 0.0]        # [deg]
+    #     orientation: [0.5, 0.5, -0.5, 0.5]
+    #   target: [6.0, 1.7, 0.0]           # [m] fixed target, qualisys is not needed
+    # - name: tortino02
+    #   mass: 0.2                         # [kg]
+    #   grasp_pose:                       # object grasp pose
+    #     position: [0.55, 0.0, 0.2]       # [m]
+    #     # rpy_deg: [90.0, 90.0, 0.0]        # [deg]
+    #     orientation: [0.5, 0.5, -0.5, 0.5]
+    #   target: [6.0, 1.7, 0.0]           # [m] fixed target, qualisys is not needed
+
+    - name: tennis_ball
+      mass: 0.056                         # [kg]
       grasp_pose:                       # object grasp pose
         position: [0.55, 0.0, 0.2]       # [m]
         # rpy_deg: [90.0, 90.0, 0.0]        # [deg]
         orientation: [0.5, 0.5, -0.5, 0.5]
       target: [3.0, 0.0, -0.94]           # [m] fixed target, qualisys is not needed
 
-    - name: big_cube
-      mass: 0.4                         # [kg]
-      grasp_pose:                       # object grasp pose
-        position: [0.55, 0.0, 0.2]       # [m]
-        # rpy_deg: [90.0, 90.0, 0.0]        # [deg]
-        orientation: [0.5, 0.5, -0.5, 0.5]
-      # no target here: this object is thrown at the box measured by qualisys
+    # - name: small_cube
+    #   mass: 0.066                         # [kg]
+    #   grasp_pose:                       # object grasp pose
+    #     position: [0.55, 0.0, 0.2]       # [m]
+    #     # rpy_deg: [90.0, 90.0, 0.0]        # [deg]
+    #     orientation: [0.5, 0.5, -0.5, 0.5]
+    #   target: [3.0, 0.0, -0.94]           # [m] fixed target, qualisys is not needed
+
+    # - name: big_cube
+    #   mass: 0.4                         # [kg]
+    #   grasp_pose:                       # object grasp pose
+    #     position: [0.55, 0.0, 0.2]       # [m]
+    #     # rpy_deg: [90.0, 90.0, 0.0]        # [deg]
+    #     orientation: [0.5, 0.5, -0.5, 0.5]
+    #   # no target here: this object is thrown at the box measured by qualisys
 

@@ -1,0 +1,33 @@
+Franka base to tool:
+  position: 
+    x: 0.004409546493154309
+    y: -0.3539862827431612
+    z: 0.6082828747171136
+  orientation: 
+    x: 0.9593099646815385
+    y: 0.0001753929625324177
+    z: 0.28233334570766544
+    w: 0.0034989714959956435
+
+Franka base to world:
+x: 190 mm
+y: 310 mm
+z: 935 mm
+
+block (b): 500x500 mm
+2b + 35 mm is 2*500+35 mm
+
+5 cm, cross:
+4b + measures
+
+6 cm, circle:
+5b + measures
+
+7 cm, triangle:
+6b + measures
+
+8 cm, square:
+8b + measures
+
+9 cm, asterisk:
+9b + measures

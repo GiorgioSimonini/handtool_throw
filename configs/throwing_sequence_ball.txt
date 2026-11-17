@@ -1,0 +1,65 @@
+### Tennis ball ###
+pose: 
+  position: 
+    x: 0.25076656330518066
+    y: -0.5446215571319726
+    z: 0.4545061823794474
+  orientation: 
+    x: 0.9665161256673018
+    y: 0.0044459559553409024
+    z: 0.25258128792795853
+    w: -0.04505003095854042
+
+distance on z flor-robotBase: 935 mm
+distance on x robotBase-0meter: 95 mm
+distribution on y on the mean of points
+
+theta from franka_pose
+valve:
+- 200
+- 100
+- 70
+- 55
+- 52
+
+70 best precision
+
+
+### Wooden ball ###
+pose: 
+  position: 
+    x: 0.16804587904620616
+    y: -0.30750534085405895
+    z: 0.47449971188145584
+  orientation: 
+    x: 0.9631271966429845
+    y: 0.03317853499989895
+    z: 0.2344002915599303
+    w: -0.127834624490026
+
+distance on z flor-robotBase: 935 mm
+distance on x robotBase-0meter: xxx mm      <--- FILL
+distribution on y on the mean of points
+
+theta from franka_pose
+valve:
+- 200
+- 100
+- 70
+- 55
+- 52
+
+
+### Wooden little cube ###
+pose: 
+  position: 
+    x: -0.04384252655147278
+    y: -0.2509020294807574
+    z: 0.6473531614646659
+  orientation: 
+    x: 0.8641877252931239
+    y: -0.004661413994314178
+    z: 0.5031437926067307
+    w: 0.0020422129137373656
+
+no repeatable throws

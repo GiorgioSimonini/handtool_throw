@@ -30,7 +30,7 @@ optimization:
   dist_min: 0.05                # [m] a target closer than this to the throwing point (horizontally) is rejected: no throwing direction
   valve_0: 0.051                # [s] valve opening time with no throw (energy model offset)
   g: 9.81                       # [m/s^2]
-  bound_valve: [0.0511, 0.5]    # [s] the lower bound must stay OFF valve_0: on it the throw has no energy and the log model has an infinite slope
+  bound_valve: [0.06, 0.5]    # [s] the lower bound must stay OFF valve_0: on it the throw has no energy and the log model has an infinite slope
   bound_theta_deg: [0.0, 90.0]  # [deg], converted to rad by the node
 
   # --- identified energy model: E(t) = a1*log_b(a2*t + a3) - E(valve_0) --- #
@@ -50,7 +50,7 @@ optimization:
   #   low   flat throw, shortest flight, least sensitive to a theta error  <- use this
   #   high  lob, the tube points almost up for a close target
   #   any   whichever of the two the cost happens to like (the old behaviour)
-  branch: low
+  branch: any
   n_starts: 5                   # multi start grid points per free variable
   valve_ref: 0.06               # [s] valve time we trust, the cost keeps the solution near it. Kept well clear of the pole of the energy model: the landing point moves 3.3 cm per 100 us of valve jitter at 0.052, 0.2 cm at 0.06.
   theta_ref_deg: 45.0           # [deg] preferred launch angle
