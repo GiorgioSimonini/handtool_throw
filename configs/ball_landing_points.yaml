@@ -7,7 +7,10 @@
 #   y: horizontal, to the left. y = 0 on the fitted line, so y is the lateral distance from that line.
 #   The tool launches along its own x axis, which is pitched up by pitch_deg (yaw ~0.16 deg in the floor frame).
 # Assumption: the Franka base axes are parallel to the floor axes.
-# Units: mm, degrees.
+# Units: mm, degrees, grams (except launch_speed in m/s and energy in J).
+# launch_speed / energy: drag-free projectile from the tool origin at pitch_deg, landing with the
+#   ball centre one radius above the floor; computed per throw from the horizontal range, then averaged.
+#   energy = 1/2 m v^2 (translational only; spin and air drag are neglected).
 
 pitch_deg: 32.80          # angle of the tool x axis above the horizontal
 tool_height: 1543.3       # tool above the floor
@@ -18,26 +21,41 @@ line_yaw_deg: 1.904      # x axis rotated by this angle about z relative to the 
 line_offset_y: -30.9      # lateral offset of the fitted line from the tool along floor +y (negative = to the right)
 
 5cm:  # cross
+  weight: 48
+  launch_speed: 5.860   # m/s, mean (std 0.029)
+  energy: 0.824         # J, mean kinetic energy at release (std 0.008)
   mean: [4763.8, 32.1]
   std:  [35.0, 24.5]
   points: [[4703, 39], [4724, 48], [4738, 17], [4758, 17], [4749, 47], [4762, -13], [4768, 31], [4718, 13], [4733, 38], [4747, -3], [4753, 37], [4754, 67], [4762, 7], [4779, 56], [4785, 76], [4783, 16], [4788, 36], [4802, 5], [4819, 40], [4850, 69]]
 
 6cm:  # circle
+  weight: 85
+  launch_speed: 5.448   # m/s, mean (std 0.048)
+  energy: 1.261         # J, mean kinetic energy at release (std 0.022)
   mean: [4270.1, -33.5]
   std:  [56.0, 18.8]
   points: [[4196, -20], [4205, -45], [4211, -30], [4221, -20], [4226, -26], [4231, -41], [4235, -56], [4241, -31], [4250, -51], [4251, -16], [4256, -37], [4271, -17], [4275, -47], [4281, -32], [4296, -33], [4307, -8], [4341, -14], [4356, -40], [4354, -90], [4396, -16]]
 
 7cm:  # triangle
+  weight: 144
+  launch_speed: 4.430   # m/s, mean (std 0.029)
+  energy: 1.413         # J, mean kinetic energy at release (std 0.018)
   mean: [3168.2, -11.9]
   std:  [28.8, 21.3]
   points: [[3125, -34], [3126, -19], [3126, 1], [3150, -35], [3140, -24], [3146, -10], [3146, 5], [3170, -40], [3170, -25], [3166, -10], [3156, -0], [3167, 20], [3190, -46], [3190, -26], [3176, -1], [3187, 29], [3196, -1], [3197, 14], [3210, -37], [3226, 3]]
 
 8cm:  # square
+  weight: 188
+  launch_speed: 3.729   # m/s, mean (std 0.045)
+  energy: 1.308         # J, mean kinetic energy at release (std 0.031)
   mean: [2497.3, 3.4]
   std:  [40.5, 20.5]
   points: [[2436, -6], [2456, -2], [2452, 18], [2452, 33], [2460, -22], [2471, -7], [2491, -8], [2486, 12], [2487, 32], [2472, 18], [2472, 38], [2510, -29], [2516, 1], [2506, 17], [2527, 21], [2530, -29], [2531, -9], [2561, -5], [2585, -21], [2546, 15]]
 
 9cm:  # asterisk
+  weight: 235
+  launch_speed: 3.136   # m/s, mean (std 0.083)
+  energy: 1.156         # J, mean kinetic energy at release (std 0.061)
   mean: [1983.7, 9.9]
   std:  [68.0, 17.7]
   points: [[1871, 13], [1896, 22], [1906, 12], [1921, 11], [1941, 25], [1956, 10], [1966, -0], [1966, 25], [1980, -26], [1981, 9], [1990, -11], [2006, 8], [2016, 18], [2020, -12], [2036, -3], [2065, -19], [2086, 16], [2152, 43], [1927, 31], [1992, 29]]
