@@ -13,6 +13,7 @@ replaces the Arduino of the tool.
 - [Frames and conventions](#frames-and-conventions)
 - [The throwing model](#the-throwing-model)
 - [Configuration](#configuration)
+- [Building](#building)
 - [Running on the real robot](#running-on-the-real-robot)
 - [Running in simulation](#running-in-simulation)
 - [Offline tools](#offline-tools)
@@ -43,29 +44,34 @@ replaces the Arduino of the tool.
   with a launch angle over the horizon and a valve time.
 - **throwing_model.py** holds the physics and the solver without any ROS, so
   `throwing_check.py` runs exactly the same code offline.
-- **ball_throw_plugin** (`src/ball_throw_plugin.cpp`) is the simulated tool. It listens to
-  the same `arduino/*` topics the real tool listens to.
+- **ball_throw_plugin** (`src/ball_throw_plugin.cpp`) is the simulated tool and the balls.
+  It listens to the same `arduino/*` topics the real tool listens to, and publishes the
+  balls and their landing points to RViz.
 
 ## Package layout
 
 | Path | What it is |
 |---|---|
 | `src/testing.cpp` | Interactive node: menu, motions, calls to the service, tool commands |
-| `src/ball_throw_plugin.cpp` | Gazebo world plugin: spawns, holds and releases the balls |
+| `src/ball_throw_plugin.cpp` | Gazebo world plugin: spawns the balls in their row, holds and releases them, RViz markers |
+| `include/handtool_throw/yaml_helpers.h` | Readers of scalars, vectors and poses from the yaml, shared by the testing node and the plugin |
 | `scripts/throwing_model.py` | Ballistic model and solver, no ROS |
 | `scripts/throwing_par.py` | ROS service node around the model |
 | `scripts/throwing_check.py` | Runs the model offline on a target, a sweep or several parameter sets |
-| `scripts/generate_sim_objects.py` | Writes the ball list of a simulated session, with random targets |
+| `scripts/generate_sim_objects.py` | Writes the ball list of a simulated session: balls in a row, random targets |
 | `scripts/dummy_qualisys.py` | Publishes fixed base and target poses in place of the motion capture |
 | `srv/throwing_par_srv.srv` | Request: mass, energy, target from the throwing point. Answer: valve time, theta |
 | `launch/handtool_throw.launch` | testing node + service, with the parameters below |
 | `launch/handtool_throw_sim.launch` | Gazebo + robot with tube + backstepping controller + `handtool_throw.launch` |
+| `launch/handtool_throw_exp.launch` | Real experiment: robot + backstepping controller + Arduino + Qualisys + `handtool_throw.launch` + `exp_throw_objects.yaml` |
 | `launch/run_arduino.launch` | rosserial node of the tool Arduino on `/dev/ttyACM0` |
 | `launch/dummy_qualisys.launch` | `dummy_qualisys.py` with `configs/dummy_qualisys_params.yaml` |
 | `urdf/panda_with_tube.urdf.xacro`, `urdf/tube.xacro` | Panda from `franka_description` with the tube bolted on the flange |
 | `worlds/ball_throw.world` | Floor, sun and the hand tool plugin |
+| `rviz/ball_throw.rviz` | Robot, targets, balls, landing points and floor |
 | `configs/handtool_params.yaml` | Throwing pose and service parameters |
 | `configs/throw_objects.yaml` | Default pose, motion times and object list of the sequence (choice 7) |
+| `configs/exp_throw_objects.yaml` | Balls of the real experiment (grasp poses to fill) and the aimed point of the box |
 | `configs/ball_throwing.txt` | Raw data of the ball experiments: frames and landing points |
 | `configs/ball_landing_points.yaml` | Ball experiments reduced to the tool frame: landing points, mass, launch energy |
 | `configs/throwing_sequence*.txt` | Notes of earlier throwing tests (tennis ball, wooden ball, cubes) |
@@ -77,11 +83,15 @@ replaces the Arduino of the tool.
   the topics is expressed here, x forward, y left, z up, in metres.
 - **Tube tip**: the end effector of the backstepping controller (thunder `EE` =
   flange + [0.14, 0, 0.02] m) is the free end of the tube (`tube_tip` in the URDF), so
-  `franka_pose` and `throw_pose` are poses of the point the object leaves from. The tube
-  axis is the x axis of that frame.
-- **Throwing point**: `testing/throw_pose`. It is the only place the throwing position is
-  defined. The testing node subtracts it from the target before calling the service, and
-  builds the robot pose from the answer:
+  `franka_pose` and the throwing pose are poses of the point the object leaves from. The
+  tube axis is the x axis of that frame.
+- **Throwing point**: the testing node owns it.
+  - Choice 7 throws every object from just above where it is grasped:
+    grasp position + `testing/throw_offset`.
+  - Choices 5 and 6 throw from `testing/throw_pose` position.
+
+  The testing node subtracts the throwing point from the target before calling the service,
+  and builds the robot pose from the answer:
 
   ```
   R_throw = Rz(azimuth) * Ry(-theta) * throw_pose.orientation,   azimuth = atan2(target.y, target.x)
@@ -152,7 +162,7 @@ apex height, flight time, and the sensitivity of the landing point to one degree
 |---|---|
 | `pre_suct_time`, `suct_time` | [s] wait before suction, and time the cup needs to hold the object |
 | `valve_us`, `duty_regulator` | Valve time and pressure regulator duty cycle of the manual choices 1–4 (255 bypasses the regulator) |
-| `throw_pose` | Throwing point (tube tip at the release) and reference orientation, see [Frames](#frames-and-conventions). Set to the tool position of the ball experiments |
+| `throw_pose` | Reference orientation of every throw, and throwing point of choices 5 and 6 (tube tip at the release), see [Frames](#frames-and-conventions). The position is the tool position of the ball experiments |
 
 `optimization` namespace:
 
@@ -176,6 +186,11 @@ This file is used by choice 7 and lives in the `testing` namespace:
   refuses to run without it.
 - `approach_offset`: [m] offset of the approach pose, in the tip frame of the grasp pose.
   -x backs the tool away along the tube.
+- `throw_offset`: [m] throwing point = grasp position + this offset, in the base frame.
+  Choice 7 refuses to run without it. It is [0, 0, 0.6]. That was the lowest offset that kept
+  a row at x = 0.5 m reachable and clear (by at least 13 cm) of the other balls, for throws up
+  to about 86°. With the tube almost vertical the wrist hangs about 0.4 m under the tip, so a
+  lower offset hits the row with the steep throws.
 - `move_time`, `approach_time`, `pre_throw_time`: [s] durations of the long and short
   motions, and settling time on the throwing pose before the blow.
 - `objects`: the list thrown one after the other. Each entry has:
@@ -188,9 +203,22 @@ This file is used by choice 7 and lives in the `testing` namespace:
   | `energy` | with `energy_source: measured` | [J] measured launch energy, see `ball_landing_points.yaml` |
   | `target` | no | [m] fixed target. Without it, the box measured by qualisys is used |
   | `radius` | simulation only | [m] radius of the simulated ball, ignored by the testing node |
+  | `sim_position` | simulation only | [m] centre of the resting ball, where the plugin spawns it, ignored by the testing node |
 
   An entry with a missing or malformed required field is skipped with an error. The list is
   re-read at every run of choice 7, so it can be reloaded with `rosparam load` in between.
+
+## Building
+
+```bash
+catkin build handtool_throw
+source devel/setup.bash
+```
+
+The Python nodes need numpy, scipy and yaml (`python3-scipy` is not in the base image of the
+workspace container: `sudo apt install python3-scipy` or `rosdep install handtool_throw`).
+After a change of `srv/throwing_par_srv.srv`, rebuild: the testing node and the service must
+see the same message.
 
 ## Running on the real robot
 
@@ -220,29 +248,89 @@ The testing node asks for a choice on the keyboard:
 | 2 | Set the duty cycle of the pressure regulator |
 | 3 | Set the valve time [us] |
 | 4 | Suck and throw from where the robot is |
-| 5 | Ask the service for the throw of `m_obj energy x y z` (target in the base frame), print the result, no motion |
-| 6 | Throw at the qualisys target: type `m_obj energy`, the robot goes to the throwing pose, sucks and throws |
+| 5 | Ask the service for the throw of `m_obj energy x y z` (target in the base frame) from `throw_pose`, print the result, no motion |
+| 6 | Throw at the qualisys target from `throw_pose`: type `m_obj energy`, the robot goes to the throwing pose, sucks and throws |
 | 7 | Objects sequence of `throw_objects.yaml`, see below |
 
 For each object, choice 7 runs:
 
 ```
-default pose -> approach pose -> grasp pose -> suction -> approach pose -> default pose
-             -> throwing pose -> wait pre_throw_time -> blow -> default pose -> press enter
+default pose -> approach pose -> grasp pose -> suction -> approach pose
+             -> waypoint -> throwing pose (grasp + throw_offset) -> wait pre_throw_time -> blow
+             -> default pose -> press enter
 ```
+
+- **Waypoint:** it sits on the throwing position, with the orientation halfway along the
+  rotation from the grasp (tube pointing down) to the throw (tube aiming up). That rotation
+  is 145–178°. Done in one segment, the backstepping lags more than 60° behind (its
+  orientation law is singular at 90°), and near 180° the rotation axis is barely defined.
+  With the waypoint, each segment turns at most about 90°.
+- **`pre_throw_time` is 5 s:** in simulation, 1 s left the tube 4–11° short of the commanded
+  pitch at the blow.
 
 The throwing parameters are asked first, so an object the service cannot throw is skipped
 before it is grabbed. The valve time of the answer is sent to the Arduino before the
 motion.
 
+The targets are published on `/throw_targets` (latched `MarkerArray`, frame `panda_link0`)
+as a red disc and the object name, on the real robot too. Choice 7 publishes all the fixed
+targets of the list at its start, and adds a qualisys target when it is measured. Choices 5
+and 6 publish their single target.
+
 > With `energy_source: measured` every object needs its `energy`. Copy it from
 > `configs/ball_landing_points.yaml`. An object without one is rejected by the service.
+
+### Ball experiment with the motion capture
+
+`launch/handtool_throw_exp.launch` starts everything the real experiment needs:
+
+- the robot and the backstepping controller (`robot_ip`, default 172.16.0.104);
+- the Arduino;
+- Qualisys;
+- the testing node and the service;
+- RViz, with `rviz:=true`.
+
+It loads `configs/exp_throw_objects.yaml` after `throw_objects.yaml`, so only the object
+list is replaced. The default pose, the motion times and `throw_offset` stay as they are.
+
+```bash
+roslaunch handtool_throw handtool_throw_exp.launch robot_ip:=<robot ip>   # rviz:=true
+# then choice 7 in the testing node
+```
+
+**Before the first run, fill `configs/exp_throw_objects.yaml`:**
+
+- **`grasp_pose` of each ball:** the measured pose of the tube tip on the ball, in the base
+  frame. A ball without one is skipped with an error, so the robot never moves to a pose
+  nobody measured.
+- **`box_target_offset`:** the point the ball centre aims at, in the frame of the
+  `box_target` rigid body. Because it is in the box frame, the box can be moved and turned
+  between throws.
+
+**How a target is measured.** The balls have no `target`, so before each one is grabbed the
+testing node waits for fresh poses of the two QTM rigid bodies:
+
+- `mpc_franka` on `/qualisys/mpc_franka/pose`: its origin and axes must coincide with
+  `panda_link0`;
+- `box_target` on `/qualisys/box_target/pose`.
+
+From those it computes the target in the base frame:
+
+```
+target = R_base^T * (p_box + R_box * box_target_offset - p_base)
+```
+
+It prints the target, publishes it to RViz, and asks the service for the angle. The
+sequence then continues exactly as in simulation: grasp, waypoint, throw from grasp +
+`throw_offset`, default pose. If the box is out of reach, the object is skipped before it
+is grabbed.
 
 ## Running in simulation
 
 `launch/handtool_throw_sim.launch` starts:
 
 - Gazebo with `worlds/ball_throw.world` (floor and the hand tool plugin);
+- RViz with `rviz/ball_throw.rviz` (`rviz:=false` to skip it);
 - the Panda with the tube, its base `base_z` = 0.935 m above the floor as in the lab;
 - the backstepping controller (`panda_controllers.yaml`);
 - `handtool_throw.launch`, the same testing node and service as on the real robot;
@@ -257,11 +345,20 @@ rosrun handtool_throw generate_sim_objects.py --n 2 --seed 0
 ```
 
 The script takes the five balls of `configs/ball_landing_points.yaml` (mass, measured energy,
-radius from the diameter). It writes each of them `--n` times with a target drawn uniformly
-on the floor in `--x` × `--y` (default [1, 5] × [-1, 1] m, base frame). A target the service
-could not reach, with the same model and the same `handtool_params.yaml`, is drawn again,
-and the throw it found is printed. Options: `--seed`, `--base-height` (must match `base_z`),
-`--x`, `--y`, `--out`. The grasp pose is taken from the first object of `throw_objects.yaml`.
+radius from the diameter) and writes each of them `--n` times:
+
+- **Row:** the balls rest in a row in front of the robot, at x = `--row-x` (0.5 m) on a
+  surface at z = `--row-z` (0 m, the height of the base). They are `--spacing` (0.15 m)
+  apart along y, centred on y = 0, from the 5 cm ball on the -y side.
+- **Grasp:** from above, with the tube pointing down (the orientation of the first object
+  of `throw_objects.yaml`), and the tip `--grasp-gap` (5 mm) over the top of the ball.
+- **Targets:** each ball gets a target drawn uniformly on the floor in `--x` × `--y`
+  (default [1, 5] × [-1, 1] m, base frame). Reachability is checked from that ball's own
+  throwing point, grasp + `throw_offset`, with the same model and the same
+  `handtool_params.yaml` as the service. A target it cannot reach is drawn again, and the
+  throw found is printed.
+
+Other options: `--seed`, `--base-height` (must match `base_z`), `--out`.
 
 **2. Launch and run the sequence.**
 
@@ -272,9 +369,11 @@ roslaunch handtool_throw handtool_throw_sim.launch          # headless:=true, rv
 
 **What the plugin does:**
 
-- `arduino/suctioning` spawns the next object of `/testing/objects` as a solid sphere. The
-  objects are taken in list order, one per suction. The ball's centre is held on the tube
-  tip, with no contacts, while the robot moves.
+- At start-up every object of `/testing/objects` is spawned as a solid sphere at its
+  `sim_position`, on a thin static shelf built under the row.
+- `arduino/suctioning` attaches the resting ball closest to the tube tip, if it is within
+  `grasp_dist` (0.1 m), so the list order does not matter. Its centre snaps onto the tip
+  and is held there, with no contacts, while the robot moves.
 - `arduino/blowing_off` releases it with the tip velocity plus sqrt(2E/m) along the tube
   axis. Contacts come back once the ball is clear of the tube.
 - When the ball first touches the floor its landing point is logged in the base frame,
@@ -284,6 +383,16 @@ roslaunch handtool_throw handtool_throw_sim.launch          # headless:=true, rv
   ball_throw: ball7cm_0_0 released at 4.430 m/s, tube axis [0.841, 0.000, 0.542] (pitch 32.80 deg)
   ball_throw: ball7cm_0_0 landed at [3.173, -0.354] m, target [3.170, -0.354] m, miss 0.003 m (base frame)
   ```
+
+In RViz (`/ball_throw/markers`, frame `panda_link0`) the plugin shows:
+
+- the floor, 0.935 m under the base;
+- the shelf;
+- every ball where it is, resting, held or flying;
+- a blue disc and the ball name where each ball first touched the floor, next to the red
+  targets of the testing node.
+
+The balls are spawned once per launch. To run the sequence again, relaunch.
 
 The plugin reads the tube tip as `panda_link7` + [0.14, 0, 0.127] m. Gazebo merges the fixed
 `panda_link8` and the tube into link 7, and that offset is the controller EE. Both are
@@ -358,9 +467,8 @@ Five balls were thrown 20 times each from a fixed tool pose with the valve open 
 - **No drag anywhere.** The model, the energy identification and Gazebo are all drag-free.
   They are consistent with one another, but the real light balls fall shorter at large
   angles.
-- **The plugin takes objects in order.** One object per suction, in list order. If the
-  testing node skips an object (no solution), the following balls shift by one. The
-  generator only writes targets the service can reach, so this happens only if the
-  parameters are changed after generating.
+- **Steep throws far to the side.** In simulation, a throw at 82° pitch and -51° azimuth
+  stopped at about 70° pitch, probably at a joint limit, and missed by 1.3 m. If the arm
+  cannot reach the commanded orientation, narrow `bound_theta_deg` or the targets.
 - **Keyboard input.** The testing node reads the keyboard through the terminal of
   `roslaunch`.

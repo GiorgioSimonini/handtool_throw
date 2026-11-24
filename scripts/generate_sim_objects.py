@@ -3,21 +3,25 @@
 
 The balls are the ones of configs/ball_landing_points.yaml: their mass, their
 measured launch energy and their radius (from the diameter of the key). Every
-ball is thrown n times, each time at a target drawn uniformly on the floor in
-the [x, y] rectangle of the robot base frame. A target the throwing service
-could not reach (same model and same parameters of configs/handtool_params.yaml)
-is drawn again.
+ball appears n times. They rest in a row in front of the robot, along y at
+--row-x, --spacing apart and centred on y = 0, on a surface at --row-z, and are
+grasped from above: tube pointing down (the orientation of the first object of
+throw_objects.yaml), tip --grasp-gap above the top of the ball. Each ball is
+thrown from grasp position + testing/throw_offset, as the testing node does, at
+a target drawn uniformly on the floor in the [x, y] rectangle of the robot base
+frame. A target the throwing service could not reach from there (same model and
+same parameters of configs/handtool_params.yaml) is drawn again.
 
 The target is the CENTRE of the ball when it touches the floor, the point the
 energies were identified with: z = -base_height + radius.
 
+'sim_position' is the centre of the resting ball, where ball_throw_plugin spawns it.
 The output only holds '/testing/objects': launch/handtool_throw_sim.launch loads
 it after configs/throw_objects.yaml, so default pose, times and so on stay there.
 
   ./generate_sim_objects.py --n 2 --seed 7
 """
 import argparse
-import copy
 import os
 import sys
 
@@ -31,13 +35,19 @@ import throwing_model as tm
 CONFIGS = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'configs')
 
 
+def quat_x_axis(q):
+    """x axis of the rotation of the quaternion [x, y, z, w]: the tube direction."""
+    x, y, z, w = np.asarray(q, float) / np.linalg.norm(q)
+    return np.array([1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w)])
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--balls', default=os.path.join(CONFIGS, 'ball_landing_points.yaml'))
     ap.add_argument('--params', default=os.path.join(CONFIGS, 'handtool_params.yaml'))
     ap.add_argument('--objects', default=os.path.join(CONFIGS, 'throw_objects.yaml'),
-                    help='the grasp pose of its first object is used for every ball')
+                    help='throw_offset, and the grasp orientation of its first object')
     ap.add_argument('--out', default=os.path.join(CONFIGS, 'sim_throw_objects.yaml'))
     ap.add_argument('--n', type=int, default=1, help='throws per ball')
     ap.add_argument('--seed', type=int, default=0)
@@ -45,6 +55,11 @@ def main():
     ap.add_argument('--y', type=float, nargs=2, default=[-1.0, 1.0], help='[m] base frame')
     ap.add_argument('--base-height', type=float, default=0.935,
                     help='[m] robot base over the floor, the base_z of handtool_throw_sim.launch')
+    ap.add_argument('--row-x', type=float, default=0.5, help='[m] base frame')
+    ap.add_argument('--row-z', type=float, default=0.0, help='[m] surface the balls rest on, base frame')
+    ap.add_argument('--spacing', type=float, default=0.15, help='[m] between two balls of the row')
+    ap.add_argument('--grasp-gap', type=float, default=0.005,
+                    help='[m] tube tip over the top of the ball at the grasp')
     ap.add_argument('--max-draws', type=int, default=1000, help='per target')
     args = ap.parse_args()
 
@@ -53,10 +68,11 @@ def main():
     if p.energy_source != 'measured':
         raise SystemExit("%s: optimization/energy_source is '%s', the balls are thrown with "
                          "their measured energy only with 'measured'" % (args.params, p.energy_source))
-    with open(args.params) as fh:
-        throw_pos = np.asarray(yaml.safe_load(fh)['testing']['throw_pose']['position'], float)
     with open(args.objects) as fh:
-        grasp_pose = yaml.safe_load(fh)['testing']['objects'][0]['grasp_pose']
+        seq = yaml.safe_load(fh)['testing']
+    throw_offset = np.asarray(seq['throw_offset'], float)
+    grasp_quat = seq['objects'][0]['grasp_pose']['orientation']    # [x, y, z, w]
+    tube_axis = quat_x_axis(grasp_quat)
     with open(args.balls) as fh:
         table = yaml.safe_load(fh)
     balls = []
@@ -68,8 +84,14 @@ def main():
 
     rng = np.random.default_rng(args.seed)
     objects = []
+    n_row = args.n * len(balls)
     for k in range(args.n):
-        for ball in balls:
+        for j, ball in enumerate(balls):
+            # - resting in the row, grasped from above, thrown from just above the grasp - #
+            y = (k * len(balls) + j - 0.5 * (n_row - 1)) * args.spacing
+            centre = np.array([args.row_x, y, args.row_z + ball['radius']])
+            grasp_pos = centre - (ball['radius'] + args.grasp_gap) * tube_axis
+            throw_pos = grasp_pos + throw_offset
             z = -args.base_height + ball['radius']
             for _ in range(args.max_draws):
                 target = np.array([rng.uniform(*args.x), rng.uniform(*args.y), z])
@@ -84,7 +106,9 @@ def main():
                                  % (ball['name'], args.max_draws))
             obj = dict(ball)
             obj['name'] = '%s_%d' % (ball['name'], k)
-            obj['grasp_pose'] = copy.deepcopy(grasp_pose)   # written in full, no yaml anchors
+            obj['grasp_pose'] = {'position': [round(float(v), 4) for v in grasp_pos],
+                                 'orientation': list(grasp_quat)}
+            obj['sim_position'] = [round(float(v), 4) for v in centre]
             obj['target'] = [round(float(v), 4) for v in target]
             objects.append(obj)
             print('%-12s target [%6.3f, %6.3f, %6.3f] m  theta %5.2f deg  %.2f m away'
@@ -93,9 +117,11 @@ def main():
 
     with open(args.out, 'w') as fh:
         fh.write('# GENERATED by scripts/generate_sim_objects.py --n %d --seed %d --x %g %g '
-                 '--y %g %g --base-height %g\n'
-                 % (args.n, args.seed, args.x[0], args.x[1], args.y[0], args.y[1], args.base_height))
-        fh.write('# mass [kg], energy [J], radius [m], target [m] in the robot base frame\n')
+                 '--y %g %g --base-height %g --row-x %g --row-z %g --spacing %g --grasp-gap %g\n'
+                 % (args.n, args.seed, args.x[0], args.x[1], args.y[0], args.y[1], args.base_height,
+                    args.row_x, args.row_z, args.spacing, args.grasp_gap))
+        fh.write('# mass [kg], energy [J], radius [m], sim_position (resting centre) and target [m] '
+                 'in the robot base frame\n')
         yaml.safe_dump({'testing': {'objects': objects}}, fh, sort_keys=False,
                        default_flow_style=None)
     print('written %d objects to %s' % (len(objects), os.path.abspath(args.out)))

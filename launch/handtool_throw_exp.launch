@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!-- Real ball throwing experiment: the whole setup in one launch.
+       - robot and backstepping controller (panda_controllers)
+       - arduino of the hand tool (rosserial)
+       - qualisys: poses of the robot base 'mpc_franka' and of the box 'box_target'
+       - testing node and throwing service, with the objects of exp_objects
+     Then run the choice 7 of the testing node: for every object it reads the box from
+     qualisys, asks the angle, grabs the object, throws it from just above the grasp pose
+     and goes back to the default pose, as in simulation. -->
+<launch>
+	<arg name="robot_ip"     default="172.16.0.104" />
+	<arg name="exp_objects"  default="$(find handtool_throw)/configs/exp_throw_objects.yaml" />
+	<arg name="rviz"         default="false" doc="robot and the measured targets" />
+
+	<!-- robot and backstepping controller -->
+	<include file="$(find panda_controllers)/launch/backstepping_controller.launch">
+		<arg name="robot_ip" value="$(arg robot_ip)" />
+	</include>
+
+	<!-- hand tool -->
+	<include file="$(find handtool_throw)/launch/run_arduino.launch" />
+
+	<!-- motion capture: /qualisys/mpc_franka/pose and /qualisys/box_target/pose -->
+	<include file="$(find mocap_qualisys)/launch/qualisys.launch" />
+
+	<!-- testing node and throwing service -->
+	<include file="$(find handtool_throw)/launch/handtool_throw.launch" />
+	<!-- loaded after throw_objects.yaml: replaces the object list, adds box_target_offset -->
+	<rosparam command="load" file="$(arg exp_objects)" />
+
+	<node pkg="rviz" type="rviz" name="rviz" if="$(arg rviz)"
+		  args="-f panda_link0 -d $(find handtool_throw)/rviz/ball_throw.rviz" />
+</launch>

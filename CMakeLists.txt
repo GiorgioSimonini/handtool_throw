@@ -12,6 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs
 	geometry_msgs
+  visualization_msgs
   panda_controllers
 	message_generation
 )
@@ -111,7 +112,7 @@ generate_messages(
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES handtool_throw
-  CATKIN_DEPENDS roscpp rospy std_msgs geometry_msgs panda_controllers message_runtime
+  CATKIN_DEPENDS roscpp rospy std_msgs geometry_msgs visualization_msgs panda_controllers message_runtime
 #  DEPENDS system_lib
 )
 

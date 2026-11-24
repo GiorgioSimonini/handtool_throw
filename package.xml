@@ -52,12 +52,16 @@
   <depend>rospy</depend>
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
   <depend>panda_controllers</depend>
   <build_depend>eigen</build_depend>
   <build_depend>message_generation</build_depend>
   <build_depend>gazebo_dev</build_depend>
   <exec_depend>gazebo_ros</exec_depend>
   <exec_depend>franka_gazebo</exec_depend>
+  <exec_depend>mocap_qualisys</exec_depend>
+  <exec_depend>rosserial_python</exec_depend>
+  <exec_depend>rviz</exec_depend>
   <exec_depend>tf</exec_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>franka_description</exec_depend>

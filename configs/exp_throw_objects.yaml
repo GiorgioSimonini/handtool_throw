@@ -1,0 +1,54 @@
+# Objects of the real ball throwing experiment, choice 7 of the testing node.
+#
+# launch/handtool_throw_exp.launch loads this file AFTER configs/throw_objects.yaml: the
+# default pose, the motion times and throw_offset stay there, only the entries below are
+# replaced. Every pose is in the robot base frame (panda_link0).
+#
+# No object has a 'target': for every object, right before it is grabbed, the testing node
+# waits for fresh qualisys poses of the robot base ('mpc_franka') and of the box
+# ('box_target'), and aims at the box point below.
+
+testing:
+
+  # [m] point the ball centre aims at, in the frame of the 'box_target' rigid body: the box
+  # can be moved and turned, the point follows it. [0, 0, 0] is the origin of the body.
+  box_target_offset: [0.0, 0.0, 0.0]      # TODO: set from the box and its marker body
+
+  # mass and energy of configs/ball_landing_points.yaml. An object without grasp_pose is
+  # skipped with an error: fill each one with the measured pose of the tube tip on the
+  # ball (grasped from above, tube pointing down: orientation [0.5, 0.5, -0.5, 0.5]).
+  objects:
+    - name: ball5cm
+      mass: 0.048                 # [kg]
+      energy: 0.824               # [J]
+      # grasp_pose:
+      #   position: [x, y, z]     # [m] TODO
+      #   orientation: [0.5, 0.5, -0.5, 0.5]
+
+    - name: ball6cm
+      mass: 0.085
+      energy: 1.261
+      # grasp_pose:
+      #   position: [x, y, z]     # [m] TODO
+      #   orientation: [0.5, 0.5, -0.5, 0.5]
+
+    - name: ball7cm
+      mass: 0.144
+      energy: 1.413
+      # grasp_pose:
+      #   position: [x, y, z]     # [m] TODO
+      #   orientation: [0.5, 0.5, -0.5, 0.5]
+
+    - name: ball8cm
+      mass: 0.188
+      energy: 1.308
+      # grasp_pose:
+      #   position: [x, y, z]     # [m] TODO
+      #   orientation: [0.5, 0.5, -0.5, 0.5]
+
+    - name: ball9cm
+      mass: 0.235
+      energy: 1.156
+      # grasp_pose:
+      #   position: [x, y, z]     # [m] TODO
+      #   orientation: [0.5, 0.5, -0.5, 0.5]

@@ -9,10 +9,12 @@
 #include <vector>
 #include <xmlrpcpp/XmlRpcValue.h>
 #include "handtool_throw/throwing_par_srv.h"
+#include "handtool_throw/yaml_helpers.h"
 
 // #include <tf/transform_broadcaster.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Point.h>
+#include <visualization_msgs/MarkerArray.h>
 #include "panda_controllers/desTrajEE.h"
 // #include <eigen_conversions/eigen_msg.h>
 
@@ -51,6 +53,9 @@ Eigen::Affine3d franka_pose_d;	// desired throwing pose, from the handtool servi
 
 Eigen::Vector3d franka_pos_qualisys;
 Eigen::Quaterniond franka_quat_qualisys;
+// [m] point the ball aims at, in the frame of the 'box_target' body: the box can be moved
+// and turned, the point follows it. '/testing/box_target_offset', zero = the body origin
+Eigen::Vector3d box_target_offset(0.0, 0.0, 0.0);
 
 double pre_suct_time = 2.0;
 double suct_time = 0.5;
@@ -68,15 +73,18 @@ Eigen::Vector3d approach_offset(-0.1, 0.0, 0.0);	// [m] grasping pose -> approac
 double move_time = 3.0;								// [s] duration of the long motions
 double approach_time = 1.5;							// [s] duration of the approach/retreat motions
 double pre_throw_time = 1.0;						// [s] settling time on the throwing pose, before the throw
+Eigen::Vector3d throw_offset(0.0, 0.0, 0.0);		// [m] base frame, grasp position -> throwing point
+bool has_throw_offset = false;						// false: the yaml does not carry one, choice 7 is disabled
 
-// --- pose the object is thrown from, '/testing/throw_pose'. THIS NODE OWNS THE
-//     THROWING POINT: the parameters service solves a planar problem around the
-//     origin, so the position below is subtracted from the target before asking and
-//     added back to build the robot pose. The orientation is the reference the tube
-//     starts from, the tube horizontal along the base +x with the roll (flange side)
-//     the throw has to keep: the aiming azimuth and the launch angle are applied on
-//     top of it, see getThrowingPar(). The defaults are the ones the throwing service
-//     used to hard-code --- //
+// --- '/testing/throw_pose'. THIS NODE OWNS THE THROWING POINT: the parameters service
+//     solves a planar problem around the origin, so the throwing point is subtracted from
+//     the target before asking and added back to build the robot pose, see getThrowingPar().
+//     position     throwing point of choices 5 and 6. Choice 7 throws every object from
+//                  above its own grasp pose instead: grasp position + throw_offset.
+//     orientation  the reference the tube starts from, horizontal along the base +x with
+//                  the roll (flange side) the throw has to keep: the aiming azimuth and the
+//                  launch angle are applied on top of it. Used by every choice.
+//     The defaults are the ones the throwing service used to hard-code --- //
 Eigen::Affine3d throw_pose;
 
 // --- one entry of the object list of the yaml --- //
@@ -95,99 +103,8 @@ struct Object {
 };
 
 
-// ----- yaml helpers ----- //
-
-// --- reads a scalar: yaml writes 3 as an int and 3.0 as a double, accept both --- //
-bool getDouble(XmlRpc::XmlRpcValue &val, double &out)
-{
-	if (val.getType() == XmlRpc::XmlRpcValue::TypeDouble){
-		out = static_cast<double>(val);
-		return true;
-	}
-	if (val.getType() == XmlRpc::XmlRpcValue::TypeInt){
-		out = static_cast<int>(val);
-		return true;
-	}
-	return false;
-}
-
-// --- reads a [x, y, z] list --- //
-bool getVector3(XmlRpc::XmlRpcValue &val, Eigen::Vector3d &out)
-{
-	if ((val.getType() != XmlRpc::XmlRpcValue::TypeArray) || (val.size() != 3)){
-		return false;
-	}
-	for (int i = 0; i < 3; i++){
-		double value;
-		if (!getDouble(val[i], value)){
-			return false;
-		}
-		out(i) = value;
-	}
-	return true;
-}
-
-// --- reads an orientation, given as a quaternion or as rpy angles --- //
-bool getQuaternion(XmlRpc::XmlRpcValue &val, Eigen::Quaterniond &quat)
-{
-	if (val.getType() != XmlRpc::XmlRpcValue::TypeStruct){
-		return false;
-	}
-	if (val.hasMember("orientation")){
-		// - quaternion [x, y, z, w], the form the throwing service answers with - //
-		XmlRpc::XmlRpcValue &quat_par = val["orientation"];
-		if ((quat_par.getType() != XmlRpc::XmlRpcValue::TypeArray) || (quat_par.size() != 4)){
-			return false;
-		}
-		double qx, qy, qz, qw;
-		if ((!getDouble(quat_par[0], qx)) || (!getDouble(quat_par[1], qy))
-			|| (!getDouble(quat_par[2], qz)) || (!getDouble(quat_par[3], qw))){
-			return false;
-		}
-		quat = Eigen::Quaterniond(qw, qx, qy, qz);
-	}else if (val.hasMember("rpy_deg")){
-		// - extrinsic xyz angles, same convention as dummy_qualisys.py, easier to write by hand - //
-		Eigen::Vector3d rpy;
-		if (!getVector3(val["rpy_deg"], rpy)){
-			return false;
-		}
-		rpy *= M_PI/180.0;
-		quat = Eigen::Quaterniond(
-			Eigen::AngleAxisd(rpy(2), Eigen::Vector3d::UnitZ())
-			* Eigen::AngleAxisd(rpy(1), Eigen::Vector3d::UnitY())
-			* Eigen::AngleAxisd(rpy(0), Eigen::Vector3d::UnitX()));
-	}else{
-		return false;
-	}
-	// a null quaternion cannot be normalised into a rotation
-	if (quat.norm() < 1e-9){
-		return false;
-	}
-	quat.normalize();
-	return true;
-}
-
-// --- reads a pose: a 'position' list plus an orientation --- //
-bool getPose(XmlRpc::XmlRpcValue &val, Eigen::Affine3d &out)
-{
-	Eigen::Vector3d position;
-	Eigen::Quaterniond quat;
-	if (val.getType() != XmlRpc::XmlRpcValue::TypeStruct){
-		return false;
-	}
-	if ((!val.hasMember("position")) || (!getVector3(val["position"], position))){
-		return false;
-	}
-	if (!getQuaternion(val, quat)){
-		return false;
-	}
-
-	// a default constructed Affine3d is uninitialized, the last row would stay garbage
-	out.setIdentity();
-	out.translation() = position;
-	out.linear() = quat.toRotationMatrix();
-	return true;
-}
+// ----- yaml helpers: getDouble, getVector3, getQuaternion, getPose ----- //
+using namespace handtool_throw;
 
 // --- reads the object list, a malformed entry is skipped instead of killing the sequence --- //
 bool loadObjects(ros::NodeHandle &nh, vector<Object> &objects)
@@ -374,15 +291,15 @@ bool moveToPose(ros::Publisher &pub_command, const Eigen::Affine3d &pose_d, doub
 
 // --- asks the service for the valve time and the launch angle of one throw, and
 //     turns them into the robot pose to throw from.
-//     target_req is in the ROBOT BASE frame, the service wants it measured from the
-//     throwing point: this is the only place where the two frames meet --- //
+//     target_req and throw_pos are in the ROBOT BASE frame, the service wants the target
+//     measured from the throwing point: this is the only place where the two frames meet --- //
 bool getThrowingPar(ros::ServiceClient &handtool_client, double m_obj, double e_obj,
-					const geometry_msgs::Point &target_req,
+					const geometry_msgs::Point &target_req, const Eigen::Vector3d &throw_pos,
 					int &valve_us_out, Eigen::Affine3d &pose_d_out)
 {
-	// - the throw leaves from throw_pose, everything the service sees is relative to it - //
+	// - the throw leaves from throw_pos, everything the service sees is relative to it - //
 	Eigen::Vector3d target_rel = Eigen::Vector3d(target_req.x, target_req.y, target_req.z)
-								- throw_pose.translation();
+								- throw_pos;
 
 	handtool_throw::throwing_par_srv srv;
 	srv.request.m_obj = m_obj;
@@ -413,7 +330,7 @@ bool getThrowingPar(ros::ServiceClient &handtool_client, double m_obj, double e_
 						* throw_pose.linear();
 
 	pose_d_out.setIdentity();
-	pose_d_out.translation() = throw_pose.translation();
+	pose_d_out.translation() = throw_pos;
 	pose_d_out.linear() = aim;
 
 	Eigen::Quaterniond quat(aim);
@@ -434,6 +351,49 @@ bool getThrowingPar(ros::ServiceClient &handtool_client, double m_obj, double e_
 	std::cout << "  z: " << quat.z() << std::endl;
 	std::cout << "  w: " << quat.w() << std::endl;
 	return true;
+}
+
+// --- rviz markers of the targets, latched: a flat disc on the target and its name.
+//     Visualization only, nothing of the throw depends on it --- //
+void addTargetMarker(vector<visualization_msgs::Marker> &markers, const string &name,
+					 const geometry_msgs::Point &target)
+{
+	visualization_msgs::Marker disc;
+	disc.header.frame_id = "panda_link0";	// the robot base frame of every target
+	disc.header.stamp = ros::Time::now();
+	disc.ns = "targets";
+	disc.id = markers.size();
+	disc.type = visualization_msgs::Marker::CYLINDER;
+	disc.action = visualization_msgs::Marker::ADD;
+	disc.pose.position = target;
+	disc.pose.orientation.w = 1.0;
+	disc.scale.x = 0.1;
+	disc.scale.y = 0.1;
+	disc.scale.z = 0.005;
+	disc.color.r = 0.9;
+	disc.color.a = 0.8;
+	markers.push_back(disc);
+
+	visualization_msgs::Marker text = disc;
+	text.ns = "target_names";
+	text.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+	text.text = name;
+	text.pose.position.z += 0.1;
+	text.scale.z = 0.06;
+	text.color.g = text.color.b = 0.9;
+	text.color.a = 1.0;
+	markers.push_back(text);
+}
+
+void publishTargetMarkers(ros::Publisher &pub_targets, const vector<visualization_msgs::Marker> &markers)
+{
+	// the latched array replaces the previous one, the markers already in rviz are cleared first
+	visualization_msgs::MarkerArray msg;
+	visualization_msgs::Marker clear;
+	clear.action = visualization_msgs::Marker::DELETEALL;
+	msg.markers.push_back(clear);
+	msg.markers.insert(msg.markers.end(), markers.begin(), markers.end());
+	pub_targets.publish(msg);
 }
 
 // --- grabs the object, the vacuum then holds it until the release --- //
@@ -490,6 +450,7 @@ int main(int argc, char **argv)
 	ros::Publisher pub_reg = nh_.advertise<std_msgs::UInt8>("arduino/duty_cycle", 1); 
 	ros::Publisher pub_valve = nh_.advertise<std_msgs::UInt32>("arduino/valve", 1);
 	ros::Publisher pub_command = nh_.advertise<panda_controllers::desTrajEE>("/backstepping_controller/command_cartesian", 1);
+	ros::Publisher pub_targets = nh_.advertise<visualization_msgs::MarkerArray>("throw_targets", 1, true);
 	// handtool service
 	ros::ServiceClient handtool_client = nh_.serviceClient<handtool_throw::throwing_par_srv>("handtool_throw_service");
 	// parameters from yaml
@@ -521,6 +482,19 @@ int main(int argc, char **argv)
 		ROS_WARN("Failed to get param '/testing/approach_offset', keeping [%f, %f, %f] m",
 			approach_offset(0), approach_offset(1), approach_offset(2));
 	}
+	vector<double> box_target_offset_par;
+	if (nh_.getParam("/testing/box_target_offset", box_target_offset_par) && (box_target_offset_par.size() == 3)){
+		box_target_offset = Eigen::Vector3d(box_target_offset_par[0], box_target_offset_par[1], box_target_offset_par[2]);
+	}
+	ROS_INFO("qualisys targets: box_target origin + [%.3f, %.3f, %.3f] m in the box frame",
+		box_target_offset(0), box_target_offset(1), box_target_offset(2));
+	vector<double> throw_offset_par;
+	if (nh_.getParam("/testing/throw_offset", throw_offset_par) && (throw_offset_par.size() == 3)){
+		throw_offset = Eigen::Vector3d(throw_offset_par[0], throw_offset_par[1], throw_offset_par[2]);
+		has_throw_offset = true;
+	}else{
+		ROS_WARN("Failed to get param '/testing/throw_offset' [x, y, z], choice 7 stays disabled");
+	}
 	if (!nh_.getParam("/testing/move_time", move_time)) {
 		ROS_WARN("Failed to get param");
 	}
@@ -537,7 +511,7 @@ int main(int argc, char **argv)
 	}else if (!getPose(throw_pose_par, throw_pose)){
 		ROS_WARN("Malformed param '/testing/throw_pose', using the default");
 	}
-	ROS_INFO("throwing from [%.3f, %.3f, %.3f] m, every target is measured from there",
+	ROS_INFO("choices 5 and 6 throw from [%.3f, %.3f, %.3f] m, choice 7 from grasp + throw_offset",
 		throw_pose.translation()(0), throw_pose.translation()(1), throw_pose.translation()(2));
 	// - the aiming is R_throw = Rz(azimuth)*Ry(-theta)*throw_pose.orientation, it points the
 	//   tube at the target only if the reference keeps the tube horizontal along the base +x - //
@@ -602,7 +576,10 @@ int main(int argc, char **argv)
 			// the solution is printed by the helper, nothing else to do here
 			int valve_opt;
 			Eigen::Affine3d pose_opt;
-			getThrowingPar(handtool_client, m_obj, e_obj, target_req, valve_opt, pose_opt);
+			getThrowingPar(handtool_client, m_obj, e_obj, target_req, throw_pose.translation(), valve_opt, pose_opt);
+			vector<visualization_msgs::Marker> markers;
+			addTargetMarker(markers, "target", target_req);
+			publishTargetMarkers(pub_targets, markers);
 			ros::Duration(0.1).sleep();
 		}else if (choice == 6){
 			// --- Complete throwing cycle --- //
@@ -617,7 +594,10 @@ int main(int argc, char **argv)
 			if (!waitForPoses(true)) break;
 
 			// - get throwing parameters - //
-			if (!getThrowingPar(handtool_client, m_obj, e_obj, target, valve_us, franka_pose_d)){
+			vector<visualization_msgs::Marker> markers;
+			addTargetMarker(markers, "target", target);
+			publishTargetMarkers(pub_targets, markers);
+			if (!getThrowingPar(handtool_client, m_obj, e_obj, target, throw_pose.translation(), valve_us, franka_pose_d)){
 				ROS_ERROR("no throwing parameters, no command is sent");
 				continue;
 			}
@@ -635,13 +615,25 @@ int main(int argc, char **argv)
 			// --- automatic sequence over the objects listed in the yaml --- //
 			// for every object: default pose -> approach -> grasp -> suck -> retreat
 			//                   -> throwing pose -> throw -> default pose -> key press
+			// the throwing pose is just above the grasp pose, grasp position + throw_offset
 			if (!has_default_pose){
 				ROS_ERROR("no valid '/testing/default_pose', fill it in the objects yaml first");
+				continue;
+			}
+			if (!has_throw_offset){
+				ROS_ERROR("no valid '/testing/throw_offset', fill it in the objects yaml first");
 				continue;
 			}
 			// re-read the list at every run, the yaml can be reloaded with rosparam meanwhile
 			vector<Object> objects;
 			if (!loadObjects(nh_, objects)) continue;
+
+			// - the targets known in advance on rviz, the measured ones are added when known - //
+			vector<visualization_msgs::Marker> target_markers;
+			for (const Object &obj : objects){
+				if (obj.has_target) addTargetMarker(target_markers, obj.name, obj.target);
+			}
+			publishTargetMarkers(pub_targets, target_markers);
 
 			// drop the newline left by 'cin >> choice', the first key press would eat it
 			cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
@@ -659,13 +651,17 @@ int main(int argc, char **argv)
 					cout<<"no target in the yaml, waiting for the qualisys poses..."<<endl;
 					if (!waitForPoses(true)) break;
 					target_obj = target;	// filled by targetCallback, robot base frame
+					addTargetMarker(target_markers, obj.name, target_obj);
+					publishTargetMarkers(pub_targets, target_markers);
 				}
 				cout<<"target: ["<<target_obj.x<<", "<<target_obj.y<<", "<<target_obj.z<<"] m"<<endl;
 
-				// - throwing parameters first: a failure must not leave the object grabbed - //
+				// - throwing parameters first: a failure must not leave the object grabbed.
+				//   The object is thrown from just above where it is taken - //
 				int valve_obj;
-				Eigen::Affine3d throw_pose;
-				if (!getThrowingPar(handtool_client, obj.m_obj, obj.e_obj, target_obj, valve_obj, throw_pose)){
+				Eigen::Affine3d throw_pose_obj;
+				Eigen::Vector3d throw_pos = obj.grasp_pose.translation() + throw_offset;
+				if (!getThrowingPar(handtool_client, obj.m_obj, obj.e_obj, target_obj, throw_pos, valve_obj, throw_pose_obj)){
 					ROS_ERROR("%s: no throwing parameters, object skipped", obj.name.c_str());
 					continue;
 				}
@@ -694,16 +690,18 @@ int main(int argc, char **argv)
 				// - leave the grasping place before moving away - //
 				if (!moveToPose(pub_command, approach_pose, approach_time)) break;
 
-				// - pass through the default position: a single minimum jerk segment from
-				//   the grasping side to the throwing pose interpolates only the cartesian
-				//   pose, the arm is free to travel through odd configurations on the way.
-				//   The default pose is a known good waypoint between the two - //
-				cout<<"going back to the default position..."<<endl;
-				if (!moveToPose(pub_command, default_pose, move_time)) break;
-
-				// - move to the throwing pose - //
+				// - up to the throwing pose, just above, in two segments. From the tube pointing
+				//   down to the tube aiming up the tool turns by 145-178 deg: in one segment the
+				//   backstepping lags more than 60 deg behind (its L is singular at 90 deg) and,
+				//   close to 180 deg, the rotation axis is barely defined. The waypoint sits on
+				//   the throwing position with the orientation halfway along the rotation, so
+				//   each segment turns at most ~90 deg - //
+				Eigen::Affine3d waypoint = throw_pose_obj;
+				waypoint.linear() = Eigen::Quaterniond(approach_pose.linear())
+									.slerp(0.5, Eigen::Quaterniond(throw_pose_obj.linear())).toRotationMatrix();
 				cout<<"going to the throwing pose..."<<endl;
-				if (!moveToPose(pub_command, throw_pose, move_time)) break;
+				if (!moveToPose(pub_command, waypoint, move_time)) break;
+				if (!moveToPose(pub_command, throw_pose_obj, move_time)) break;
 
 				// - the controller reaches the commanded pose with some delay, give it
 				//   the time to settle before letting the object go - //
@@ -751,14 +749,20 @@ void targetCallback(const geometry_msgs::PoseStamped::ConstPtr &msg)
 		return;
 	}
 
-	// Posizione ostacolo nel sistema Qualisys
-	Eigen::Vector3d p_target_qualisys(
+	// - box pose in the qualisys frame, the aimed point is offset in the box frame - //
+	Eigen::Vector3d p_box_qualisys(
 		msg->pose.position.x,
 		msg->pose.position.y,
 		msg->pose.position.z);
+	Eigen::Quaterniond quat_box_qualisys(
+		msg->pose.orientation.w,
+		msg->pose.orientation.x,
+		msg->pose.orientation.y,
+		msg->pose.orientation.z);
+	Eigen::Vector3d p_target_qualisys = p_box_qualisys + quat_box_qualisys.normalized() * box_target_offset;
 
-	// TRASFORMAZIONE: posizione ostacolo rispetto al centro del robot
-	Eigen::Vector3d p_rel = franka_quat_qualisys.inverse() *
+	// - then in the robot base frame: the 'mpc_franka' body is panda_link0 - //
+	Eigen::Vector3d p_rel = franka_quat_qualisys.normalized().inverse() *
 							(p_target_qualisys - franka_pos_qualisys);
 
 	target.x = p_rel(0);

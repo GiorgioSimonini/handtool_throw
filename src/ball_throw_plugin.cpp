@@ -1,23 +1,27 @@
-// Gazebo world plugin: the hand tool of the simulation.
+// Gazebo world plugin: the hand tool of the simulation, and the balls it throws.
 //
-// It listens to the same topics the arduino of the real tool listens to, so the
-// testing node runs unchanged:
-//   arduino/suctioning   spawns the next ball of '/testing/objects' and holds it
-//                        on the tube tip (centre on the tip, no contacts)
-//   arduino/blowing_off  releases it: tip velocity + sqrt(2 E / m) along the tube x,
+// At start-up every object of '/testing/objects' is spawned as a ball resting at its
+// 'sim_position' (centre, robot base frame), on a thin static shelf built under them.
+// Then it listens to the topics the arduino of the real tool listens to, so the testing
+// node runs unchanged:
+//   arduino/suctioning   the resting ball closest to the tube tip is attached: its centre
+//                        is held on the tip, with no contacts, until the release
+//   arduino/blowing_off  it is released: tip velocity + sqrt(2 E / m) along the tube x,
 //                        E being the measured 'energy' of the object
-// The balls are taken from '/testing/objects' in order, one per suction: the
-// sequence of choice 7 grabs them in the same order. When the ball comes down to
-// the floor its landing point is logged in the robot base frame, next to its target.
+// When a ball comes down to the floor its landing point is logged in the robot base
+// frame, next to its target. The floor, the shelf, the balls and the landing points are
+// published as rviz markers on 'ball_throw/markers' (visualization only).
 //
-// Everything runs in the physics thread: the ROS callbacks are served from
-// onUpdate(), so the hold and the release happen on a physics step.
+// Everything runs in the physics thread: the ROS callbacks are served from onUpdate(),
+// so the hold and the release happen on a physics step.
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include <gazebo/common/Events.hh>
 #include <gazebo/common/Plugin.hh>
@@ -28,79 +32,80 @@
 #include <ros/callback_queue.h>
 #include <ros/ros.h>
 #include <std_msgs/Empty.h>
-#include <xmlrpcpp/XmlRpcValue.h>
+#include <visualization_msgs/MarkerArray.h>
+#include "handtool_throw/yaml_helpers.h"
 
 namespace gazebo
 {
 
-// --- one ball, read from an entry of '/testing/objects' --- //
+using ignition::math::Pose3d;
+using ignition::math::Quaterniond;
+using ignition::math::Vector3d;
+
+// --- one ball, from an entry of '/testing/objects' --- //
 struct Ball {
+	enum State { RESTING, HELD, FLYING, LANDED };
 	std::string name;
 	double mass = 0.0;					// [kg]
 	double energy = 0.0;				// [J] launch energy
 	double radius = 0.0;				// [m]
+	Vector3d rest;						// [m] centre where it is spawned, robot base frame
 	bool has_target = false;
-	ignition::math::Vector3d target;	// [m] robot base frame
+	Vector3d target;					// [m] robot base frame
+	State state = RESTING;
+	physics::ModelPtr model;			// null until the spawned ball exists
+	Vector3d release;					// [m] world, where it left the tip
+	bool collides = true;				// contacts on (off while held and just after the release)
+	Vector3d landing;					// [m] robot base frame
 };
 
-// yaml writes 3 as an int and 3.0 as a double, accept both
-static bool getDouble(XmlRpc::XmlRpcValue &val, double &out)
+// --- reads the balls of '/testing/objects': mass, energy, radius and sim_position are required --- //
+static bool readBalls(std::vector<Ball> &balls)
 {
-	if (val.getType() == XmlRpc::XmlRpcValue::TypeDouble){
-		out = static_cast<double>(val);
-		return true;
-	}
-	if (val.getType() == XmlRpc::XmlRpcValue::TypeInt){
-		out = static_cast<int>(val);
-		return true;
-	}
-	return false;
-}
-
-// --- reads entry i of '/testing/objects': mass, energy and radius are required --- //
-static bool readBall(int i, Ball &ball)
-{
+	using namespace handtool_throw;
 	XmlRpc::XmlRpcValue list;
-	if (!ros::param::get("/testing/objects", list) || (list.getType() != XmlRpc::XmlRpcValue::TypeArray)
-		|| (list.size() == 0)){
+	if (!ros::param::get("/testing/objects", list) || (list.getType() != XmlRpc::XmlRpcValue::TypeArray)){
 		ROS_ERROR("ball_throw: no '/testing/objects' list, load the sim objects yaml");
 		return false;
 	}
-	XmlRpc::XmlRpcValue &item = list[i % list.size()];
-	if (item.getType() != XmlRpc::XmlRpcValue::TypeStruct){
-		ROS_ERROR("ball_throw: objects[%d] is not a dictionary", i % list.size());
-		return false;
+	for (int i = 0; i < list.size(); i++){
+		XmlRpc::XmlRpcValue &item = list[i];
+		Ball ball;
+		Eigen::Vector3d v;
+		ball.name = "ball_" + std::to_string(i);
+		if (item.getType() != XmlRpc::XmlRpcValue::TypeStruct){
+			ROS_ERROR("ball_throw: objects[%d] is not a dictionary, skipped", i);
+			continue;
+		}
+		if (item.hasMember("name") && (item["name"].getType() == XmlRpc::XmlRpcValue::TypeString)){
+			ball.name = static_cast<std::string>(item["name"]);
+		}
+		if ((!item.hasMember("mass")) || (!getDouble(item["mass"], ball.mass)) || (ball.mass <= 0.0)
+			|| (!item.hasMember("energy")) || (!getDouble(item["energy"], ball.energy)) || (ball.energy <= 0.0)
+			|| (!item.hasMember("radius")) || (!getDouble(item["radius"], ball.radius)) || (ball.radius <= 0.0)
+			|| (!item.hasMember("sim_position")) || (!getVector3(item["sim_position"], v))){
+			ROS_ERROR("ball_throw: objects[%d] (%s) needs positive 'mass', 'energy', 'radius' and a "
+				"'sim_position', skipped", i, ball.name.c_str());
+			continue;
+		}
+		ball.rest = Vector3d(v(0), v(1), v(2));
+		if (item.hasMember("target") && getVector3(item["target"], v)){
+			ball.has_target = true;
+			ball.target = Vector3d(v(0), v(1), v(2));
+		}
+		balls.push_back(ball);
 	}
-	ball.name = "ball";
-	if (item.hasMember("name") && (item["name"].getType() == XmlRpc::XmlRpcValue::TypeString)){
-		ball.name = static_cast<std::string>(item["name"]);
-	}
-	if ((!item.hasMember("mass")) || (!getDouble(item["mass"], ball.mass)) || (ball.mass <= 0.0)
-		|| (!item.hasMember("energy")) || (!getDouble(item["energy"], ball.energy)) || (ball.energy <= 0.0)
-		|| (!item.hasMember("radius")) || (!getDouble(item["radius"], ball.radius)) || (ball.radius <= 0.0)){
-		ROS_ERROR("ball_throw: objects[%d] (%s) needs positive 'mass', 'energy' and 'radius'",
-			i % list.size(), ball.name.c_str());
-		return false;
-	}
-	ball.has_target = false;
-	if (item.hasMember("target") && (item["target"].getType() == XmlRpc::XmlRpcValue::TypeArray)
-		&& (item["target"].size() == 3)){
-		double t[3];
-		ball.has_target = getDouble(item["target"][0], t[0]) && getDouble(item["target"][1], t[1])
-						  && getDouble(item["target"][2], t[2]);
-		ball.target = ignition::math::Vector3d(t[0], t[1], t[2]);
-	}
-	return true;
+	return !balls.empty();
 }
 
-// --- solid sphere, spawned far from everything: it is moved on the tip once it exists --- //
-static std::string ballSdf(const std::string &model_name, const Ball &ball)
+// --- solid sphere --- //
+static std::string ballSdf(const std::string &name, const Ball &ball, const Vector3d &pos)
 {
 	const double r = ball.radius;
 	const double I = 0.4 * ball.mass * r * r;
 	std::ostringstream s;
-	s << "<sdf version='1.6'><model name='" << model_name << "'>"
-	  << "<pose>0 0 20 0 0 0</pose>"
+	s << "<sdf version='1.6'><model name='" << name << "'>"
+	  << "<pose>" << pos.X() << " " << pos.Y() << " " << pos.Z() << " 0 0 0</pose>"
 	  << "<link name='ball'>"
 	  << "<inertial><mass>" << ball.mass << "</mass><inertia>"
 	  << "<ixx>" << I << "</ixx><iyy>" << I << "</iyy><izz>" << I << "</izz>"
@@ -109,6 +114,20 @@ static std::string ballSdf(const std::string &model_name, const Ball &ball)
 	  << "<visual name='visual'><geometry><sphere><radius>" << r << "</radius></sphere></geometry>"
 	  << "<material><script><uri>file://media/materials/scripts/gazebo.material</uri>"
 	  << "<name>Gazebo/Orange</name></script></material></visual>"
+	  << "</link></model></sdf>";
+	return s.str();
+}
+
+// --- static box --- //
+static std::string boxSdf(const std::string &name, const Pose3d &pose, const Vector3d &size)
+{
+	std::ostringstream s;
+	s << "<sdf version='1.6'><model name='" << name << "'><static>true</static>"
+	  << "<pose>" << pose << "</pose><link name='link'>"
+	  << "<collision name='collision'><geometry><box><size>" << size << "</size></box></geometry></collision>"
+	  << "<visual name='visual'><geometry><box><size>" << size << "</size></box></geometry>"
+	  << "<material><script><uri>file://media/materials/scripts/gazebo.material</uri>"
+	  << "<name>Gazebo/Wood</name></script></material></visual>"
 	  << "</link></model></sdf>";
 	return s.str();
 }
@@ -128,22 +147,33 @@ public:
 		robot_model_ = sdf->Get<std::string>("robot_model", "panda").first;
 		tip_link_ = sdf->Get<std::string>("tip_link", "panda_link7").first;
 		base_link_ = sdf->Get<std::string>("base_link", "panda_link0").first;
-		tip_offset_ = sdf->Get<ignition::math::Vector3d>("tip_offset",
-					  ignition::math::Vector3d(0.14, 0.0, 0.127)).first;
+		tip_offset_ = sdf->Get<Vector3d>("tip_offset", Vector3d(0.14, 0.0, 0.127)).first;
 		floor_z_ = sdf->Get<double>("floor_z", 0.0).first;
+		grasp_dist_ = sdf->Get<double>("grasp_dist", 0.1).first;
+		marker_period_ = 1.0 / sdf->Get<double>("marker_rate", 30.0).first;
 
 		nh_.reset(new ros::NodeHandle());
 		nh_->setCallbackQueue(&queue_);
 		sub_suct_ = nh_->subscribe("arduino/suctioning", 1, &BallThrowPlugin::onSuction, this);
 		sub_blow_ = nh_->subscribe("arduino/blowing_off", 1, &BallThrowPlugin::onBlow, this);
+		pub_markers_ = nh_->advertise<visualization_msgs::MarkerArray>("ball_throw/markers", 1);
 		update_ = event::Events::ConnectWorldUpdateBegin(std::bind(&BallThrowPlugin::onUpdate, this));
 		ROS_INFO("ball_throw: tube tip = %s::%s + [%.3f, %.3f, %.3f] m, floor at z = %.3f m",
 			robot_model_.c_str(), tip_link_.c_str(), tip_offset_.X(), tip_offset_.Y(), tip_offset_.Z(), floor_z_);
 	}
 
 private:
-	// --- tube tip, world frame. The tube x axis is the x axis of the tip link --- //
-	bool tipState(ignition::math::Pose3d &pose, ignition::math::Vector3d &vel)
+	// --- robot base and tube tip, world frame. The tube x axis is the x axis of the tip link --- //
+	bool basePose(Pose3d &base)
+	{
+		physics::ModelPtr robot = world_->ModelByName(robot_model_);
+		physics::LinkPtr link = robot ? robot->GetLink(base_link_) : nullptr;
+		if (!link) return false;
+		base = link->WorldPose();
+		return true;
+	}
+
+	bool tipState(Pose3d &pose, Vector3d &vel)
 	{
 		physics::ModelPtr robot = world_->ModelByName(robot_model_);
 		physics::LinkPtr link = robot ? robot->GetLink(tip_link_) : nullptr;
@@ -151,52 +181,86 @@ private:
 			ROS_ERROR_THROTTLE(1.0, "ball_throw: no link %s::%s", robot_model_.c_str(), tip_link_.c_str());
 			return false;
 		}
-		const ignition::math::Pose3d link_pose = link->WorldPose();
-		pose = ignition::math::Pose3d(link_pose.Pos() + link_pose.Rot().RotateVector(tip_offset_), link_pose.Rot());
+		const Pose3d link_pose = link->WorldPose();
+		pose = Pose3d(link_pose.Pos() + link_pose.Rot().RotateVector(tip_offset_), link_pose.Rot());
 		vel = link->WorldLinearVel(tip_offset_);
 		return true;
 	}
 
+	// --- the balls in their row and the shelf under them, once the robot exists --- //
+	void spawnRow(const Pose3d &base)
+	{
+		row_done_ = true;
+		if (!readBalls(balls_)) return;
+
+		// - shelf: top at the lowest ball bottom, footprint of the row plus a margin - //
+		const double margin = 0.05, thickness = 0.02;
+		Vector3d lo(1e9, 1e9, 1e9), hi(-1e9, -1e9, -1e9);
+		for (const Ball &b : balls_){
+			lo = Vector3d(std::min(lo.X(), b.rest.X() - b.radius), std::min(lo.Y(), b.rest.Y() - b.radius),
+						  std::min(lo.Z(), b.rest.Z() - b.radius));
+			hi = Vector3d(std::max(hi.X(), b.rest.X() + b.radius), std::max(hi.Y(), b.rest.Y() + b.radius), 0.0);
+		}
+		shelf_size_ = Vector3d(hi.X() - lo.X() + 2 * margin, hi.Y() - lo.Y() + 2 * margin, thickness);
+		shelf_centre_ = Vector3d(0.5 * (lo.X() + hi.X()), 0.5 * (lo.Y() + hi.Y()), lo.Z() - 0.5 * thickness);
+		world_->InsertModelString(boxSdf("ball_shelf",
+			Pose3d(base.Pos() + base.Rot().RotateVector(shelf_centre_), base.Rot()), shelf_size_));
+
+		for (Ball &b : balls_){
+			world_->InsertModelString(ballSdf(b.name, b, base.Pos() + base.Rot().RotateVector(b.rest)));
+		}
+		ROS_INFO("ball_throw: %zu balls spawned in their row", balls_.size());
+	}
+
 	void onSuction(const std_msgs::Empty::ConstPtr &)
 	{
-		if (held_){
-			ROS_WARN("ball_throw: suction while %s is still on the tool, it is removed", model_name_.c_str());
-			world_->RemoveModel(model_name_);
+		Pose3d tip;
+		Vector3d tip_vel;
+		if (!tipState(tip, tip_vel)) return;
+		// - the resting ball closest to the tip is the one under the suction cup - //
+		Ball *closest = nullptr;
+		double dist = std::numeric_limits<double>::infinity();
+		for (Ball &b : balls_){
+			if ((b.state != Ball::RESTING) || (!b.model)) continue;
+			const double d = b.model->WorldPose().Pos().Distance(tip.Pos());
+			if (d < dist){
+				dist = d;
+				closest = &b;
+			}
 		}
-		if (!readBall(n_balls_, ball_)){
-			held_ = false;
+		if ((!closest) || (dist > grasp_dist_)){
+			ROS_WARN("ball_throw: suction with no ball within %.3f m of the tip (closest %.3f m), nothing grabbed",
+				grasp_dist_, dist);
 			return;
 		}
-		// unique name: choice 7 can be run again on the same object list
-		model_name_ = ball_.name + "_" + std::to_string(n_balls_);
-		n_balls_++;
-		world_->InsertModelString(ballSdf(model_name_, ball_));
-		ball_model_.reset();
-		held_ = true;
-		flying_ = false;
+		closest->state = Ball::HELD;
+		closest->collides = false;
+		closest->model->SetCollideMode("none");
 		ROS_INFO("ball_throw: %s on the tool (%.3f kg, %.3f J, r %.3f m)",
-			model_name_.c_str(), ball_.mass, ball_.energy, ball_.radius);
+			closest->name.c_str(), closest->mass, closest->energy, closest->radius);
 	}
 
 	void onBlow(const std_msgs::Empty::ConstPtr &)
 	{
-		ignition::math::Pose3d tip;
-		ignition::math::Vector3d tip_vel;
-		if ((!held_) || (!ball_model_) || (!tipState(tip, tip_vel))){
+		Ball *held = nullptr;
+		for (Ball &b : balls_){
+			if (b.state == Ball::HELD) held = &b;
+		}
+		Pose3d tip;
+		Vector3d tip_vel;
+		if ((!held) || (!tipState(tip, tip_vel))){
 			ROS_WARN("ball_throw: blow with no ball on the tool, nothing is thrown");
 			return;
 		}
-		const double v = std::sqrt(2.0 * ball_.energy / ball_.mass);
-		const ignition::math::Vector3d axis = tip.Rot().RotateVector(ignition::math::Vector3d::UnitX);
-		ball_model_->SetWorldPose(ignition::math::Pose3d(tip.Pos(), ignition::math::Quaterniond::Identity));
-		ball_model_->SetLinearVel(tip_vel + v * axis);
-		ball_model_->SetAngularVel(ignition::math::Vector3d::Zero);
-		release_pos_ = tip.Pos();
-		held_ = false;
-		flying_ = true;
-		collides_ = false;
+		const double v = std::sqrt(2.0 * held->energy / held->mass);
+		const Vector3d axis = tip.Rot().RotateVector(Vector3d::UnitX);
+		held->model->SetWorldPose(Pose3d(tip.Pos(), Quaterniond::Identity));
+		held->model->SetLinearVel(tip_vel + v * axis);
+		held->model->SetAngularVel(Vector3d::Zero);
+		held->release = tip.Pos();
+		held->state = Ball::FLYING;
 		ROS_INFO("ball_throw: %s released at %.3f m/s, tube axis [%.3f, %.3f, %.3f] (pitch %.2f deg)",
-			model_name_.c_str(), v, axis.X(), axis.Y(), axis.Z(),
+			held->name.c_str(), v, axis.X(), axis.Y(), axis.Z(),
 			std::asin(std::max(-1.0, std::min(1.0, axis.Z()))) * 180.0 / M_PI);
 	}
 
@@ -204,76 +268,130 @@ private:
 	{
 		queue_.callAvailable();
 
-		// - the spawned ball appears a few steps after the request: no contacts from then on - //
-		if (held_ && (!ball_model_)){
-			ball_model_ = world_->ModelByName(model_name_);
-			if (ball_model_){
-				ball_model_->SetCollideMode("none");
+		Pose3d base;
+		if (!basePose(base)) return;	// the robot is not spawned yet
+		if (!row_done_) spawnRow(base);
+
+		Pose3d tip;
+		Vector3d tip_vel;
+		const bool has_tip = tipState(tip, tip_vel);
+		for (Ball &b : balls_){
+			// - the spawned models appear a few steps after the request - //
+			if (!b.model){
+				b.model = world_->ModelByName(b.name);
+				continue;
+			}
+			// - on the tool: the ball follows the tip, its own dynamics is overwritten every step - //
+			if ((b.state == Ball::HELD) && has_tip){
+				b.model->SetWorldPose(Pose3d(tip.Pos(), Quaterniond::Identity));
+				b.model->SetLinearVel(tip_vel);
+				b.model->SetAngularVel(Vector3d::Zero);
+			}
+			if (b.state == Ball::FLYING){
+				const Vector3d p = b.model->WorldPose().Pos();
+				// - contacts back on once the ball is clear of the tube it was overlapping - //
+				if ((!b.collides) && (p.Distance(b.release) > b.radius + 0.02)){
+					b.model->SetCollideMode("all");
+					b.collides = true;
+				}
+				// - first touch of the floor: where, in the robot base frame - //
+				if (p.Z() <= floor_z_ + b.radius + 0.002){
+					b.landing = base.Rot().RotateVectorReverse(p - base.Pos());
+					b.state = Ball::LANDED;
+					logLanding(b);
+				}
 			}
 		}
 
-		// - on the tool: the ball follows the tip, its own dynamics is overwritten every step - //
-		ignition::math::Pose3d tip;
-		ignition::math::Vector3d tip_vel;
-		if (held_ && ball_model_ && tipState(tip, tip_vel)){
-			ball_model_->SetWorldPose(ignition::math::Pose3d(tip.Pos(), ignition::math::Quaterniond::Identity));
-			ball_model_->SetLinearVel(tip_vel);
-			ball_model_->SetAngularVel(ignition::math::Vector3d::Zero);
-		}
-
-		if (flying_){
-			const ignition::math::Vector3d p = ball_model_->WorldPose().Pos();
-			// - contacts back on once the ball is clear of the tube it was overlapping - //
-			if ((!collides_) && (p.Distance(release_pos_) > ball_.radius + 0.02)){
-				ball_model_->SetCollideMode("all");
-				collides_ = true;
-			}
-			// - first touch of the floor: log where, in the robot base frame - //
-			if (p.Z() <= floor_z_ + ball_.radius + 0.002){
-				logLanding(p);
-				flying_ = false;
-			}
+		const double now = world_->SimTime().Double();
+		if (now - last_markers_ >= marker_period_){
+			last_markers_ = now;
+			publishMarkers(base);
 		}
 	}
 
-	// diagnostics only, nothing of the simulation depends on it
-	void logLanding(const ignition::math::Vector3d &p_world)
+	// ----- diagnostics and visualization, nothing of the simulation depends on them ----- //
+	void logLanding(const Ball &b)
 	{
-		physics::ModelPtr robot = world_->ModelByName(robot_model_);
-		physics::LinkPtr base = robot ? robot->GetLink(base_link_) : nullptr;
-		if (!base){
-			ROS_INFO("ball_throw: %s landed at [%.3f, %.3f] m (world)", model_name_.c_str(), p_world.X(), p_world.Y());
-			return;
-		}
-		const ignition::math::Pose3d b = base->WorldPose();
-		const ignition::math::Vector3d p = b.Rot().RotateVectorReverse(p_world - b.Pos());
-		if (ball_.has_target){
+		if (b.has_target){
 			ROS_INFO("ball_throw: %s landed at [%.3f, %.3f] m, target [%.3f, %.3f] m, miss %.3f m (base frame)",
-				model_name_.c_str(), p.X(), p.Y(), ball_.target.X(), ball_.target.Y(),
-				std::hypot(p.X() - ball_.target.X(), p.Y() - ball_.target.Y()));
+				b.name.c_str(), b.landing.X(), b.landing.Y(), b.target.X(), b.target.Y(),
+				std::hypot(b.landing.X() - b.target.X(), b.landing.Y() - b.target.Y()));
 		}else{
-			ROS_INFO("ball_throw: %s landed at [%.3f, %.3f] m (base frame)", model_name_.c_str(), p.X(), p.Y());
+			ROS_INFO("ball_throw: %s landed at [%.3f, %.3f] m (base frame)", b.name.c_str(), b.landing.X(), b.landing.Y());
 		}
+	}
+
+	static visualization_msgs::Marker marker(const std::string &ns, int id, int type, const Vector3d &pos,
+											 const Vector3d &scale, float r, float g, float b, float a)
+	{
+		visualization_msgs::Marker m;
+		m.header.frame_id = "panda_link0";	// robot base frame, the one of the targets
+		m.header.stamp = ros::Time::now();
+		m.ns = ns;
+		m.id = id;
+		m.type = type;
+		m.action = visualization_msgs::Marker::ADD;
+		m.pose.position.x = pos.X();
+		m.pose.position.y = pos.Y();
+		m.pose.position.z = pos.Z();
+		m.pose.orientation.w = 1.0;
+		m.scale.x = scale.X();
+		m.scale.y = scale.Y();
+		m.scale.z = scale.Z();
+		m.color.r = r;
+		m.color.g = g;
+		m.color.b = b;
+		m.color.a = a;
+		return m;
+	}
+
+	void publishMarkers(const Pose3d &base)
+	{
+		using visualization_msgs::Marker;
+		visualization_msgs::MarkerArray msg;
+		// - floor under the throwing area, the targets are drawn on it - //
+		const double floor_base_z = base.Rot().RotateVectorReverse(Vector3d(0, 0, floor_z_) - base.Pos()).Z();
+		msg.markers.push_back(marker("floor", 0, Marker::CUBE, Vector3d(3.0, 0.0, floor_base_z - 0.001),
+									 Vector3d(8.0, 4.0, 0.002), 0.5, 0.5, 0.5, 0.5));
+		if (row_done_ && (!balls_.empty())){
+			msg.markers.push_back(marker("shelf", 0, Marker::CUBE, shelf_centre_, shelf_size_, 0.6, 0.4, 0.2, 1.0));
+		}
+		for (size_t i = 0; i < balls_.size(); i++){
+			const Ball &b = balls_[i];
+			if (!b.model) continue;
+			const Vector3d p = base.Rot().RotateVectorReverse(b.model->WorldPose().Pos() - base.Pos());
+			const double d = 2.0 * b.radius;
+			msg.markers.push_back(marker("balls", i, Marker::SPHERE, p, Vector3d(d, d, d), 1.0, 0.5, 0.0, 1.0));
+			if (b.state == Ball::LANDED){
+				msg.markers.push_back(marker("landings", i, Marker::CYLINDER, b.landing,
+											 Vector3d(0.06, 0.06, 0.006), 0.1, 0.4, 1.0, 0.9));
+				Marker text = marker("landing_names", i, Marker::TEXT_VIEW_FACING, b.landing + Vector3d(0, 0, 0.1),
+									 Vector3d(0, 0, 0.06), 0.1, 0.4, 1.0, 1.0);
+				text.text = b.name;
+				msg.markers.push_back(text);
+			}
+		}
+		pub_markers_.publish(msg);
 	}
 
 	physics::WorldPtr world_;
 	std::string robot_model_, tip_link_, base_link_;
-	ignition::math::Vector3d tip_offset_;	// [m] tube tip in the tip link frame
+	Vector3d tip_offset_;					// [m] tube tip in the tip link frame
 	double floor_z_ = 0.0;					// [m] world height of the floor
+	double grasp_dist_ = 0.1;				// [m] farthest ball centre the suction can grab
+	double marker_period_ = 1.0 / 30.0;		// [s] sim time between two marker arrays
+	double last_markers_ = -1e9;
 
 	std::unique_ptr<ros::NodeHandle> nh_;
 	ros::CallbackQueue queue_;
 	ros::Subscriber sub_suct_, sub_blow_;
+	ros::Publisher pub_markers_;
 	event::ConnectionPtr update_;
 
-	int n_balls_ = 0;					// suctions served, index of the next object
-	Ball ball_;							// the ball on the tool or in flight
-	std::string model_name_;
-	physics::ModelPtr ball_model_;		// null until the spawned ball exists
-	bool held_ = false;					// on the tube tip
-	bool flying_ = false;				// released, not yet on the floor
-	bool collides_ = false;				// contacts enabled again after the release
-	ignition::math::Vector3d release_pos_;
+	bool row_done_ = false;					// the row is spawned once, at the first robot pose
+	std::vector<Ball> balls_;
+	Vector3d shelf_centre_, shelf_size_;	// [m] robot base frame
 };
 
 GZ_REGISTER_WORLD_PLUGIN(BallThrowPlugin)
