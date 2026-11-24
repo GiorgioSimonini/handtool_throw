@@ -1,8 +1,8 @@
 # Objects of the real ball throwing experiment, choice 7 of the testing node.
 #
 # launch/handtool_throw_exp.launch loads this file AFTER configs/throw_objects.yaml: the
-# default pose, the motion times and throw_offset stay there, only the entries below are
-# replaced. Every pose is in the robot base frame (panda_link0).
+# default pose and the motion times stay there, only the entries below are replaced.
+# Every pose is in the robot base frame (panda_link0).
 #
 # No object has a 'target': for every object, right before it is grabbed, the testing node
 # waits for fresh qualisys poses of the robot base ('mpc_franka') and of the box
@@ -13,6 +13,11 @@ testing:
   # [m] point the ball centre aims at, in the frame of the 'box_target' rigid body: the box
   # can be moved and turned, the point follows it. [0, 0, 0] is the origin of the body.
   box_target_offset: [0.0, 0.0, 0.0]      # TODO: set from the box and its marker body
+
+  # [m] every ball is thrown from here: 6 cm above the grasp position of ball6cm, the first
+  # one. Thrown from above ball7cm and ball8cm the tool hits the robot. Update it when the
+  # grasp pose of ball6cm changes.
+  throw_position: [0.4163, -0.1710, 0.5]
 
   # mass and energy of configs/ball_landing_points.yaml. An object without grasp_pose is
   # skipped with an error: fill each one with the measured pose of the tube tip on the

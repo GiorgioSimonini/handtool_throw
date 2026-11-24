@@ -5,7 +5,7 @@
        - qualisys: poses of the robot base 'mpc_franka' and of the box 'box_target'
        - testing node and throwing service, with the objects of exp_objects
      Then run the choice 7 of the testing node: for every object it reads the box from
-     qualisys, asks the angle, grabs the object, throws it from just above the grasp pose
+     qualisys, asks the angle, grabs the object, throws it from throw_position (6 cm above ball6cm)
      and goes back to the default pose, as in simulation. -->
 <launch>
 	<arg name="robot_ip"     default="172.16.0.104" />

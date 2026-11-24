@@ -6,11 +6,11 @@ measured launch energy and their radius (from the diameter of the key). Every
 ball appears n times. They rest in a row in front of the robot, along y at
 --row-x, --spacing apart and centred on y = 0, on a surface at --row-z, and are
 grasped from above: tube pointing down (the orientation of the first object of
-throw_objects.yaml), tip --grasp-gap above the top of the ball. Each ball is
-thrown from grasp position + testing/throw_offset, as the testing node does, at
-a target drawn uniformly on the floor in the [x, y] rectangle of the robot base
-frame. A target the throwing service could not reach from there (same model and
-same parameters of configs/handtool_params.yaml) is drawn again.
+throw_objects.yaml), tip --grasp-gap above the top of the ball. Every ball is
+thrown from testing/throw_position of throw_objects.yaml, as the testing node
+does, at a target drawn uniformly on the floor in the [x, y] rectangle of the
+robot base frame. A target the throwing service could not reach from there (same
+model and same parameters of configs/handtool_params.yaml) is drawn again.
 
 The target is the CENTRE of the ball when it touches the floor, the point the
 energies were identified with: z = -base_height + radius.
@@ -47,7 +47,7 @@ def main():
     ap.add_argument('--balls', default=os.path.join(CONFIGS, 'ball_landing_points.yaml'))
     ap.add_argument('--params', default=os.path.join(CONFIGS, 'handtool_params.yaml'))
     ap.add_argument('--objects', default=os.path.join(CONFIGS, 'throw_objects.yaml'),
-                    help='throw_offset, and the grasp orientation of its first object')
+                    help='throw_position, and the grasp orientation of its first object')
     ap.add_argument('--out', default=os.path.join(CONFIGS, 'sim_throw_objects.yaml'))
     ap.add_argument('--n', type=int, default=1, help='throws per ball')
     ap.add_argument('--seed', type=int, default=0)
@@ -70,7 +70,7 @@ def main():
                          "their measured energy only with 'measured'" % (args.params, p.energy_source))
     with open(args.objects) as fh:
         seq = yaml.safe_load(fh)['testing']
-    throw_offset = np.asarray(seq['throw_offset'], float)
+    throw_pos = np.asarray(seq['throw_position'], float)
     grasp_quat = seq['objects'][0]['grasp_pose']['orientation']    # [x, y, z, w]
     tube_axis = quat_x_axis(grasp_quat)
     with open(args.balls) as fh:
@@ -87,11 +87,10 @@ def main():
     n_row = args.n * len(balls)
     for k in range(args.n):
         for j, ball in enumerate(balls):
-            # - resting in the row, grasped from above, thrown from just above the grasp - #
+            # - resting in the row, grasped from above - #
             y = (k * len(balls) + j - 0.5 * (n_row - 1)) * args.spacing
             centre = np.array([args.row_x, y, args.row_z + ball['radius']])
             grasp_pos = centre - (ball['radius'] + args.grasp_gap) * tube_axis
-            throw_pos = grasp_pos + throw_offset
             z = -args.base_height + ball['radius']
             for _ in range(args.max_draws):
                 target = np.array([rng.uniform(*args.x), rng.uniform(*args.y), z])

@@ -86,8 +86,7 @@ replaces the Arduino of the tool.
   `franka_pose` and the throwing pose are poses of the point the object leaves from. The
   tube axis is the x axis of that frame.
 - **Throwing point**: the testing node owns it.
-  - Choice 7 throws every object from just above where it is grasped:
-    grasp position + `testing/throw_offset`.
+  - Choice 7 throws every object from `testing/throw_position`.
   - Choices 5 and 6 throw from `testing/throw_pose` position.
 
   The testing node subtracts the throwing point from the target before calling the service,
@@ -186,11 +185,12 @@ This file is used by choice 7 and lives in the `testing` namespace:
   refuses to run without it.
 - `approach_offset`: [m] offset of the approach pose, in the tip frame of the grasp pose.
   -x backs the tool away along the tube.
-- `throw_offset`: [m] throwing point = grasp position + this offset, in the base frame.
-  Choice 7 refuses to run without it. It is [0, 0, 0.6]. That was the lowest offset that kept
-  a row at x = 0.5 m reachable and clear (by at least 13 cm) of the other balls, for throws up
-  to about 86°. With the tube almost vertical the wrist hangs about 0.4 m under the tip, so a
-  lower offset hits the row with the steep throws.
+- `throw_position`: [m] throwing point of every object (tube tip at the blow), in the base
+  frame. Choice 7 refuses to run without it. All the objects leave from the same point: thrown
+  from above their own grasp, the balls on the +y side of the row put the tool against the
+  robot. In the ball experiment it is 6 cm above the grasp position of `ball6cm`, see
+  `exp_throw_objects.yaml`. Keep it clear of the objects still resting: with the tube almost
+  vertical the wrist hangs about 0.4 m under the tip.
 - `move_time`, `approach_time`, `pre_throw_time`: [s] durations of the long and short
   motions, and settling time on the throwing pose before the blow.
 - `objects`: the list thrown one after the other. Each entry has:
@@ -256,7 +256,7 @@ For each object, choice 7 runs:
 
 ```
 default pose -> approach pose -> grasp pose -> suction -> approach pose
-             -> waypoint -> throwing pose (grasp + throw_offset) -> wait pre_throw_time -> blow
+             -> waypoint -> throwing pose (throw_position) -> wait pre_throw_time -> blow
              -> default pose -> press enter
 ```
 
@@ -291,7 +291,8 @@ and 6 publish their single target.
 - RViz, with `rviz:=true`.
 
 It loads `configs/exp_throw_objects.yaml` after `throw_objects.yaml`, so only the object
-list is replaced. The default pose, the motion times and `throw_offset` stay as they are.
+list, `box_target_offset` and `throw_position` are replaced. The default pose and the
+motion times stay as they are.
 
 ```bash
 roslaunch handtool_throw handtool_throw_exp.launch robot_ip:=<robot ip>   # rviz:=true
@@ -306,6 +307,10 @@ roslaunch handtool_throw handtool_throw_exp.launch robot_ip:=<robot ip>   # rviz
 - **`box_target_offset`:** the point the ball centre aims at, in the frame of the
   `box_target` rigid body. Because it is in the box frame, the box can be moved and turned
   between throws.
+- **`throw_position`:** where every ball is thrown from, 6 cm above the grasp position of
+  `ball6cm` (the first ball, thrown first, so that spot is free by then). Thrown from above
+  `ball7cm` or `ball8cm`, the tool hits the robot. Update it whenever the grasp pose of
+  `ball6cm` is measured again.
 
 **How a target is measured.** The balls have no `target`, so before each one is grabbed the
 testing node waits for fresh poses of the two QTM rigid bodies:
@@ -321,8 +326,8 @@ target = R_base^T * (p_box + R_box * box_target_offset - p_base)
 ```
 
 It prints the target, publishes it to RViz, and asks the service for the angle. The
-sequence then continues exactly as in simulation: grasp, waypoint, throw from grasp +
-`throw_offset`, default pose. If the box is out of reach, the object is skipped before it
+sequence then continues exactly as in simulation: grasp, waypoint, throw from
+`throw_position`, default pose. If the box is out of reach, the object is skipped before it
 is grabbed.
 
 ## Running in simulation
@@ -353,8 +358,8 @@ radius from the diameter) and writes each of them `--n` times:
 - **Grasp:** from above, with the tube pointing down (the orientation of the first object
   of `throw_objects.yaml`), and the tip `--grasp-gap` (5 mm) over the top of the ball.
 - **Targets:** each ball gets a target drawn uniformly on the floor in `--x` × `--y`
-  (default [1, 5] × [-1, 1] m, base frame). Reachability is checked from that ball's own
-  throwing point, grasp + `throw_offset`, with the same model and the same
+  (default [1, 5] × [-1, 1] m, base frame). Reachability is checked from the
+  `throw_position` of `throw_objects.yaml`, with the same model and the same
   `handtool_params.yaml` as the service. A target it cannot reach is drawn again, and the
   throw found is printed.
 

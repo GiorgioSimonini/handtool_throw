@@ -73,14 +73,14 @@ Eigen::Vector3d approach_offset(-0.1, 0.0, 0.0);	// [m] grasping pose -> approac
 double move_time = 3.0;								// [s] duration of the long motions
 double approach_time = 1.5;							// [s] duration of the approach/retreat motions
 double pre_throw_time = 1.0;						// [s] settling time on the throwing pose, before the throw
-Eigen::Vector3d throw_offset(0.0, 0.0, 0.0);		// [m] base frame, grasp position -> throwing point
-bool has_throw_offset = false;						// false: the yaml does not carry one, choice 7 is disabled
+Eigen::Vector3d throw_position(0.0, 0.0, 0.0);		// [m] base frame, throwing point of every object
+bool has_throw_position = false;					// false: the yaml does not carry one, choice 7 is disabled
 
 // --- '/testing/throw_pose'. THIS NODE OWNS THE THROWING POINT: the parameters service
 //     solves a planar problem around the origin, so the throwing point is subtracted from
 //     the target before asking and added back to build the robot pose, see getThrowingPar().
 //     position     throwing point of choices 5 and 6. Choice 7 throws every object from
-//                  above its own grasp pose instead: grasp position + throw_offset.
+//                  '/testing/throw_position' instead.
 //     orientation  the reference the tube starts from, horizontal along the base +x with
 //                  the roll (flange side) the throw has to keep: the aiming azimuth and the
 //                  launch angle are applied on top of it. Used by every choice.
@@ -488,12 +488,12 @@ int main(int argc, char **argv)
 	}
 	ROS_INFO("qualisys targets: box_target origin + [%.3f, %.3f, %.3f] m in the box frame",
 		box_target_offset(0), box_target_offset(1), box_target_offset(2));
-	vector<double> throw_offset_par;
-	if (nh_.getParam("/testing/throw_offset", throw_offset_par) && (throw_offset_par.size() == 3)){
-		throw_offset = Eigen::Vector3d(throw_offset_par[0], throw_offset_par[1], throw_offset_par[2]);
-		has_throw_offset = true;
+	vector<double> throw_position_par;
+	if (nh_.getParam("/testing/throw_position", throw_position_par) && (throw_position_par.size() == 3)){
+		throw_position = Eigen::Vector3d(throw_position_par[0], throw_position_par[1], throw_position_par[2]);
+		has_throw_position = true;
 	}else{
-		ROS_WARN("Failed to get param '/testing/throw_offset' [x, y, z], choice 7 stays disabled");
+		ROS_WARN("Failed to get param '/testing/throw_position' [x, y, z], choice 7 stays disabled");
 	}
 	if (!nh_.getParam("/testing/move_time", move_time)) {
 		ROS_WARN("Failed to get param");
@@ -511,8 +511,9 @@ int main(int argc, char **argv)
 	}else if (!getPose(throw_pose_par, throw_pose)){
 		ROS_WARN("Malformed param '/testing/throw_pose', using the default");
 	}
-	ROS_INFO("choices 5 and 6 throw from [%.3f, %.3f, %.3f] m, choice 7 from grasp + throw_offset",
-		throw_pose.translation()(0), throw_pose.translation()(1), throw_pose.translation()(2));
+	ROS_INFO("choices 5 and 6 throw from [%.3f, %.3f, %.3f] m, choice 7 from [%.3f, %.3f, %.3f] m",
+		throw_pose.translation()(0), throw_pose.translation()(1), throw_pose.translation()(2),
+		throw_position(0), throw_position(1), throw_position(2));
 	// - the aiming is R_throw = Rz(azimuth)*Ry(-theta)*throw_pose.orientation, it points the
 	//   tube at the target only if the reference keeps the tube horizontal along the base +x - //
 	Eigen::Vector3d ref_tube = throw_pose.linear() * Eigen::Vector3d::UnitX();
@@ -615,13 +616,13 @@ int main(int argc, char **argv)
 			// --- automatic sequence over the objects listed in the yaml --- //
 			// for every object: default pose -> approach -> grasp -> suck -> retreat
 			//                   -> throwing pose -> throw -> default pose -> key press
-			// the throwing pose is just above the grasp pose, grasp position + throw_offset
+			// every object is thrown from the same point, throw_position
 			if (!has_default_pose){
 				ROS_ERROR("no valid '/testing/default_pose', fill it in the objects yaml first");
 				continue;
 			}
-			if (!has_throw_offset){
-				ROS_ERROR("no valid '/testing/throw_offset', fill it in the objects yaml first");
+			if (!has_throw_position){
+				ROS_ERROR("no valid '/testing/throw_position', fill it in the objects yaml first");
 				continue;
 			}
 			// re-read the list at every run, the yaml can be reloaded with rosparam meanwhile
@@ -656,12 +657,10 @@ int main(int argc, char **argv)
 				}
 				cout<<"target: ["<<target_obj.x<<", "<<target_obj.y<<", "<<target_obj.z<<"] m"<<endl;
 
-				// - throwing parameters first: a failure must not leave the object grabbed.
-				//   The object is thrown from just above where it is taken - //
+				// - throwing parameters first: a failure must not leave the object grabbed - //
 				int valve_obj;
 				Eigen::Affine3d throw_pose_obj;
-				Eigen::Vector3d throw_pos = obj.grasp_pose.translation() + throw_offset;
-				if (!getThrowingPar(handtool_client, obj.m_obj, obj.e_obj, target_obj, throw_pos, valve_obj, throw_pose_obj)){
+				if (!getThrowingPar(handtool_client, obj.m_obj, obj.e_obj, target_obj, throw_position, valve_obj, throw_pose_obj)){
 					ROS_ERROR("%s: no throwing parameters, object skipped", obj.name.c_str());
 					continue;
 				}
@@ -690,7 +689,7 @@ int main(int argc, char **argv)
 				// - leave the grasping place before moving away - //
 				if (!moveToPose(pub_command, approach_pose, approach_time)) break;
 
-				// - up to the throwing pose, just above, in two segments. From the tube pointing
+				// - to the throwing pose in two segments. From the tube pointing
 				//   down to the tube aiming up the tool turns by 145-178 deg: in one segment the
 				//   backstepping lags more than 60 deg behind (its L is singular at 90 deg) and,
 				//   close to 180 deg, the rotation axis is barely defined. The waypoint sits on

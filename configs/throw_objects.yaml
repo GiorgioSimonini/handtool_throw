@@ -26,11 +26,10 @@ testing:
   # from the object, so the approach and the retreat run along the tool axis.
   approach_offset: [-0.1, 0.0, 0.0]     # [m] tip frame, keep it clear of the object
 
-  # --- every object is thrown from just above where it is grasped: the throwing point is
-  #     grasp position + throw_offset, base frame. 0.6 m is the lowest offset that kept a
-  #     row at x = 0.5 m reachable and clear (> 13 cm) of the other balls for throws up to
-  #     ~86 deg: with the tube almost vertical the wrist hangs ~0.4 m under the tip --- #
-  throw_offset: [0.0, 0.0, 0.0]         # [m] base frame
+  # --- every object is thrown from this point (tube tip at the blow), base frame.
+  #     One point for all: thrown from above their own grasp, some objects of a row put the
+  #     tool against the robot. Here the grasp position of the tennis ball --- #
+  throw_position: [0.55, 0.0, 0.2]      # [m] base frame
 
   # --- durations of the minimum jerk motions --- #
   move_time: 3.0                        # [s] default <-> approach <-> throwing pose
