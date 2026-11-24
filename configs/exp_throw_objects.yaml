@@ -18,37 +18,26 @@ testing:
   # skipped with an error: fill each one with the measured pose of the tube tip on the
   # ball (grasped from above, tube pointing down: orientation [0.5, 0.5, -0.5, 0.5]).
   objects:
-    - name: ball5cm
-      mass: 0.048                 # [kg]
-      energy: 0.824               # [J]
-      # grasp_pose:
-      #   position: [x, y, z]     # [m] TODO
-      #   orientation: [0.5, 0.5, -0.5, 0.5]
-
     - name: ball6cm
       mass: 0.085
       energy: 1.261
-      # grasp_pose:
-      #   position: [x, y, z]     # [m] TODO
-      #   orientation: [0.5, 0.5, -0.5, 0.5]
+      grasp_pose:
+        position: [0.4163359533877259, -0.17096781488766022, 0.3899315699771453]     # [m]
+        orientation: [-0.502094732956324, -0.5030113447544889, 0.5067405228672747, -0.4879492890352433]
+
 
     - name: ball7cm
       mass: 0.144
       energy: 1.413
-      # grasp_pose:
-      #   position: [x, y, z]     # [m] TODO
-      #   orientation: [0.5, 0.5, -0.5, 0.5]
+      grasp_pose:
+        position: [0.41627109451975786, -0.008003849593625604, 0.3971754284276952]     # [m]
+        orientation: [-0.509064458549812, -0.49941133034753327, 0.5161822903357625, -0.47433905943493665]
+
 
     - name: ball8cm
       mass: 0.188
       energy: 1.308
-      # grasp_pose:
-      #   position: [x, y, z]     # [m] TODO
-      #   orientation: [0.5, 0.5, -0.5, 0.5]
+      grasp_pose:
+        position: [0.4095894877241757, 0.16214763581226188, 0.40574817952487874]     # [m]
+        orientation: [0.5224979657387766, 0.49152529971928277, -0.49747214883459023, 0.48777065990955715]
 
-    - name: ball9cm
-      mass: 0.235
-      energy: 1.156
-      # grasp_pose:
-      #   position: [x, y, z]     # [m] TODO
-      #   orientation: [0.5, 0.5, -0.5, 0.5]
