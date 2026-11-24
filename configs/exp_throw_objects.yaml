@@ -12,7 +12,7 @@ testing:
 
   # [m] point the ball centre aims at, in the frame of the 'box_target' rigid body: the box
   # can be moved and turned, the point follows it. [0, 0, 0] is the origin of the body.
-  box_target_offset: [0.0, 0.0, 0.0]      # TODO: set from the box and its marker body
+  box_target_offset: [0.0, 0.0, 0.0]
 
   # [m] every ball is thrown from here: 6 cm above the grasp position of ball6cm, the first
   # one. Thrown from above ball7cm and ball8cm the tool hits the robot. Update it when the
