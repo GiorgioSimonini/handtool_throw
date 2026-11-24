@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<!-- Simulated ball throwing: gazebo + backstepping controller + the throwing nodes.
+
+     The robot base stands base_z over the floor, as in the lab (configs/ball_throwing.txt).
+     The objects come from sim_objects, generate them first with the same base height:
+       rosrun handtool_throw generate_sim_objects.py   (options n, seed, x, y, base-height)
+     then run the choice 7 of the testing node: the balls are spawned on the tube tip at
+     the suction and thrown with their measured energy at the blow (ball_throw_plugin). -->
+<launch>
+	<arg name="base_z"      default="0.935" doc="[m] robot base over the floor, same as generate_sim_objects.py --base-height" />
+	<arg name="sim_objects" default="$(find handtool_throw)/configs/sim_throw_objects.yaml" />
+	<arg name="headless"    default="false" />
+	<arg name="rviz"        default="false" />
+
+	<!-- gazebo, robot with the tube and backstepping controller, as panda_controllers_sim.launch -->
+	<rosparam command="load" file="$(find panda_controllers)/config/panda_controllers.yaml" />
+	<include file="$(find panda_controllers)/launch/gazebo/panda.launch">
+		<arg name="world"            value="$(find handtool_throw)/worlds/ball_throw.world" />
+		<arg name="z"                value="$(arg base_z)" />
+		<arg name="headless"         value="$(arg headless)" />
+		<arg name="rviz"             value="$(arg rviz)" />
+		<arg name="rviz_config"      value="$(find panda_controllers)/launch/rviz/franka_marker.rviz" />
+		<arg name="controller"       value="backstepping_controller" />
+		<arg name="description_file" value="$(find handtool_throw)/urdf/panda_with_tube.urdf.xacro" />
+		<arg name="xacro_args"       value="tube:=true" />
+	</include>
+
+	<!-- testing node and throwing service, with the parameters of the real robot -->
+	<include file="$(find handtool_throw)/launch/handtool_throw.launch" />
+	<!-- loaded after throw_objects.yaml: replaces only the object list -->
+	<rosparam command="load" file="$(arg sim_objects)" />
+</launch>

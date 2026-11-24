@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!-- Floor of the ball throwing experiments. The robot is spawned above it by
+     launch/handtool_throw_sim.launch (base_z), the plugin is the simulated hand tool,
+     see src/ball_throw_plugin.cpp -->
+<sdf version="1.6">
+  <world name="ball_throw">
+    <include><uri>model://ground_plane</uri></include>
+    <include><uri>model://sun</uri></include>
+
+    <plugin name="ball_throw" filename="libball_throw_plugin.so">
+      <robot_model>panda</robot_model>
+      <!-- Gazebo merges the fixed link8 and tube into panda_link7: the tube tip is
+           link7 + joint8 [0 0 0.107] + tube tip [0.14 0 0.02], the EE of the controller -->
+      <tip_link>panda_link7</tip_link>
+      <tip_offset>0.14 0 0.127</tip_offset>
+      <base_link>panda_link0</base_link>
+      <floor_z>0.0</floor_z>
+    </plugin>
+  </world>
+</sdf>

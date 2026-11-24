@@ -18,6 +18,9 @@ find_package(catkin REQUIRED COMPONENTS
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
+# gazebo 11 headers need c++17
+set(CMAKE_CXX_STANDARD 17)
+find_package(gazebo REQUIRED)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -121,7 +124,9 @@ catkin_package(
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
+  ${GAZEBO_INCLUDE_DIRS}
 )
+link_directories(${GAZEBO_LIBRARY_DIRS})
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
@@ -138,6 +143,8 @@ include_directories(
 ## The recommended prefix ensures that target names across packages don't collide
 # add_executable(${PROJECT_NAME}_node src/handtool_throw_node.cpp)
 add_executable(testing src/testing.cpp)
+# the srv header must be generated before testing.cpp is compiled
+add_dependencies(testing ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -155,6 +162,13 @@ add_executable(testing src/testing.cpp)
 # )
 target_link_libraries(testing
   ${catkin_LIBRARIES}
+)
+
+# gazebo world plugin of the simulated hand tool, see launch/handtool_throw_sim.launch
+add_library(ball_throw_plugin src/ball_throw_plugin.cpp)
+target_link_libraries(ball_throw_plugin
+  ${catkin_LIBRARIES}
+  ${GAZEBO_LIBRARIES}
 )
 
 #############
@@ -175,6 +189,7 @@ catkin_install_python(PROGRAMS
   scripts/throwing_model.py
   scripts/throwing_check.py
   scripts/dummy_qualisys.py
+  scripts/generate_sim_objects.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

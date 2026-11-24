@@ -2,8 +2,10 @@
 # license removed for brevity
 """handtool_throw service node: answers with the parameters of one throw.
 
-The request carries the target measured FROM THE THROWING POINT, the answer is
-the valve time and the launch angle. The node never sees the throwing pose: the
+The request carries the target measured FROM THE THROWING POINT and the
+measured launch energy of the object, the answer is the valve time and the
+launch angle. 'optimization/energy_source' decides where the energy comes from,
+see throwing_model.py. The node never sees the throwing pose: the
 caller owns it, subtracts it before asking and builds the tool orientation out
 of the launch angle afterwards.
 
@@ -35,6 +37,8 @@ def load_params():
     p.dist_min = rospy.get_param('optimization/dist_min', p.dist_min)
     p.valve_0 = rospy.get_param('optimization/valve_0', p.valve_0)
     p.g = rospy.get_param('optimization/g', p.g)
+    p.energy_source = rospy.get_param('optimization/energy_source', p.energy_source)
+    p.used_valve_us = rospy.get_param('optimization/used_valve_us', p.used_valve_us)
     # - identified energy model - #
     p.energy_a1 = rospy.get_param('optimization/energy_a1', p.energy_a1)
     p.energy_a2 = rospy.get_param('optimization/energy_a2', p.energy_a2)
@@ -73,15 +77,16 @@ def load_params():
 # ----- service callback ----- #
 def callback_throwing_par(req):
     m_obj = req.m_obj
+    e_obj = req.energy
     # the request is already relative to the throwing point, see throwing_par_srv.srv
     target = np.array([req.target.x, req.target.y, req.target.z])
     # - reject a request that cannot be served, answer stays False - #
-    error = tm.check_target(params, m_obj, target)
+    error = tm.check_target(params, m_obj, e_obj, target)
     if error:
         rospy.logerr('handtool_server: rejected request, %s', error)
         return throwing_par_srvResponse(answer=False)
     try:
-        sol = tm.solve(params, m_obj, target)
+        sol = tm.solve(params, m_obj, e_obj, target)
     except (ValueError, ZeroDivisionError, FloatingPointError) as e:
         rospy.logerr('handtool_server: throwing parameters computation failed: %s', e)
         return throwing_par_srvResponse(answer=False)
@@ -94,7 +99,7 @@ def callback_throwing_par(req):
 
     # result_theta is the launch angle over the horizon: the testing node builds the
     # tool orientation from it, the aiming azimuth and its reference orientation
-    return throwing_par_srvResponse(result_valve_us=int(sol.valve_dt * 1e6),
+    return throwing_par_srvResponse(result_valve_us=int(round(sol.valve_dt * 1e6)),
                                     result_theta=sol.theta,
                                     answer=True)
 
@@ -105,6 +110,11 @@ def handtool_server():
     rospy.init_node('handtool_server')
     params = load_params()
 
+    if params.energy_source == 'measured':
+        rospy.loginfo("handtool_server: energy_source 'measured': theta only, energy from the "
+                      "request, valve always %d us", params.used_valve_us)
+    else:
+        rospy.loginfo("handtool_server: energy_source 'valve': identified valve energy model")
     rospy.loginfo('handtool_server: valve bounds [%f, %f] s, theta bounds [%f, %f] deg',
                   params.bound_valve[0], params.bound_valve[1],
                   np.rad2deg(params.bound_theta[0]), np.rad2deg(params.bound_theta[1]))

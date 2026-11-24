@@ -2,8 +2,15 @@
 """Ballistic model and throwing optimizer of the hand tool.
 
 Everything here is PLANAR and relative: the throwing point is the origin, the
-object leaves it at a speed set by the valve time and at an angle theta over the
-horizon, and the target is given as a vector from that same origin. Where the
+object leaves it at a speed set by its launch energy and at an angle theta over
+the horizon, and the target is given as a vector from that same origin.
+
+The launch energy comes from ONE switch, ThrowingParams.energy_source:
+  'valve'     energy(valve_dt) of the identified valve model, the optimizer moves
+              the free_vars among valve time and theta (the original behaviour)
+  'measured'  energy measured per object (configs/ball_landing_points.yaml) and
+              given with the request, theta is the only unknown and is solved in
+              closed form, the valve is always opened for used_valve_us Where the
 tool actually is, and which way it has to be turned to aim, is none of this
 module's business: the caller places the throw (testing.cpp does it out of
 '/testing/throw_pose').
@@ -18,6 +25,7 @@ from scipy.optimize import minimize
 
 VAR_NAMES = ('valve', 'theta')   # order of the optimization vector x
 BRANCHES = ('low', 'high', 'any')
+ENERGY_SOURCES = ('valve', 'measured')
 
 
 # ----- parameters ----- #
@@ -30,6 +38,10 @@ class ThrowingParams(object):
                                     #     has no throwing direction, its azimuth is undefined
         self.valve_0 = 0.051        # [s] valve time that releases no energy
         self.g = 9.81               # [m/s^2]
+        # --- where the launch energy comes from, see the module docstring --- #
+        self.energy_source = 'measured'
+        self.used_valve_us = 70000  # [us] valve time of every 'measured' throw, the one
+                                    #      the energies were measured with
         # --- identified energy model, E(valve_dt) = a1*log_b(a2*t+a3) - (same at valve_0) --- #
         self.energy_a1 = 2.0
         self.energy_a2 = 1.0
@@ -64,6 +76,11 @@ class ThrowingParams(object):
         if not self.free_vars:
             msgs.append("free_vars is empty, nothing can be optimized: falling back to ['theta']")
             self.free_vars = ['theta']
+        if self.energy_source not in ENERGY_SOURCES:
+            msgs.append("energy_source '%s' is not one of %s, using 'valve'"
+                        % (self.energy_source, ENERGY_SOURCES))
+            self.energy_source = 'valve'
+        self.used_valve_us = int(self.used_valve_us)
         if self.branch not in BRANCHES:
             msgs.append("branch '%s' is not one of %s, using 'any'" % (self.branch, BRANCHES))
             self.branch = 'any'
@@ -104,12 +121,18 @@ def energy(p, valve_dt):
     return 0.0
 
 
+def speed_of_energy(m_obj, e):
+    """[m/s] speed of an object of m_obj [kg] carrying e [J]."""
+    return sqrt(2.0 * e / m_obj)
+
+
 def speed(p, m_obj, valve_dt):
-    """[m/s] speed the object leaves the tube with."""
-    return sqrt(2.0 * energy(p, valve_dt) / m_obj)
+    """[m/s] speed the object leaves the tube with, valve model."""
+    return speed_of_energy(m_obj, energy(p, valve_dt))
 
 
-def landing(p, m_obj, valve_dt, h, theta):
+# - the ballistic functions below take the launch speed v [m/s], whatever its source - #
+def landing(p, v, h, theta):
     """[m] horizontal distance covered while falling by h.
 
     The discriminant is clamped at zero so the function stays real and
@@ -118,38 +141,33 @@ def landing(p, m_obj, valve_dt, h, theta):
     value is then the horizontal distance of the apex, the boundary case.
     Use reaches() to tell a real solution from that boundary.
     """
-    v = speed(p, m_obj, valve_dt)
     disc = v * v * sin(theta) ** 2 + 2.0 * p.g * h
     return v * cos(theta) / p.g * (v * sin(theta) + sqrt(max(disc, 0.0)))
 
 
-def reaches(p, m_obj, valve_dt, h, theta):
+def reaches(p, v, h, theta):
     """False when the object never comes down to the height of the target."""
-    v = speed(p, m_obj, valve_dt)
     return (v > 0.0) and (v * v * sin(theta) ** 2 + 2.0 * p.g * h >= 0.0)
 
 
-def apex_angle(p, m_obj, valve_dt, h):
+def apex_angle(p, v, h):
     """[rad] launch angle of maximum range: the border between the two branches.
 
     Below it the distance grows with theta (flat throw), above it the distance
     shrinks again (lob). Classic result for a throw from a height h.
     """
-    v = speed(p, m_obj, valve_dt)
     if v <= 0.0:
         return np.pi / 4
     return atan2(v, sqrt(max(v * v + 2.0 * p.g * h, 0.0)))
 
 
-def apex_height(p, m_obj, valve_dt, theta):
+def apex_height(p, v, theta):
     """[m] how high above the throwing point the object goes."""
-    v = speed(p, m_obj, valve_dt)
     return (v * sin(theta)) ** 2 / (2.0 * p.g)
 
 
-def flight_time(p, m_obj, valve_dt, h, theta):
+def flight_time(p, v, h, theta):
     """[s] time between the release and the landing."""
-    v = speed(p, m_obj, valve_dt)
     disc = v * v * sin(theta) ** 2 + 2.0 * p.g * h
     return (v * sin(theta) + sqrt(max(disc, 0.0))) / p.g
 
@@ -166,12 +184,18 @@ def target_info(target):
     return [dist, h]
 
 
-def check_target(p, m_obj, target):
-    """Error string, empty when the request can be served."""
+def check_target(p, m_obj, e_obj, target):
+    """Error string, empty when the request can be served.
+
+    e_obj [J] is the measured launch energy, only read when energy_source is 'measured'.
+    """
     if not np.all(np.isfinite(target)):
         return 'target is not finite'
     if (not np.isfinite(m_obj)) or (m_obj <= 0.0):
         return 'object mass must be positive, got {}'.format(m_obj)
+    if (p.energy_source == 'measured') and ((not np.isfinite(e_obj)) or (e_obj <= 0.0)):
+        return ("energy_source is 'measured' but the object energy is {} J: give the "
+                "measured launch energy of the object").format(e_obj)
     # a target on the vertical of the throwing point has no throwing direction
     # and its aiming azimuth would be undefined
     dist_xy = float(np.linalg.norm(np.asarray(target[0:2], dtype=float)))
@@ -230,6 +254,7 @@ class Solution(object):
         self.dist_desired, self.h = target_info(self.target)
         self.valve_dt = p.valve_ref
         self.theta = p.theta_ref
+        self.v = 0.0                # [m/s] launch speed of the accepted throw
         # nan until a solution is accepted: a plain 0.0 reads like a real throw
         self.dist = float('nan')
         self.miss = float('inf')
@@ -242,52 +267,64 @@ class Solution(object):
     # - derived quantities, all recomputed from the accepted solution - #
     @property
     def speed(self):
-        return speed(self.p, self.m_obj, self.valve_dt)
+        return self.v
+
+    @property
+    def energy(self):
+        return 0.5 * self.m_obj * self.v ** 2
 
     @property
     def branch(self):
-        apex = apex_angle(self.p, self.m_obj, self.valve_dt, self.h)
+        apex = apex_angle(self.p, self.v, self.h)
         return 'low' if self.theta <= apex + 1e-9 else 'high'
 
     @property
     def apex(self):
-        return apex_height(self.p, self.m_obj, self.valve_dt, self.theta)
+        return apex_height(self.p, self.v, self.theta)
 
     @property
     def time_of_flight(self):
-        return flight_time(self.p, self.m_obj, self.valve_dt, self.h, self.theta)
+        return flight_time(self.p, self.v, self.h, self.theta)
 
     def sensitivity(self):
         """[m per 100 us, m per deg] how far the landing point moves with a small error.
 
         This is what makes a solution usable or not on the real tool: the valve
         timing has a jitter of some tens of microseconds and theta is only as
-        good as the controller tracking at the release.
+        good as the controller tracking at the release. With a 'measured' energy
+        the valve time does not set the speed, its sensitivity is nan.
         """
-        d_valve = 1e-6
         d_theta = np.deg2rad(1e-3)
-        fd_valve = (landing(self.p, self.m_obj, self.valve_dt + d_valve, self.h, self.theta)
-                    - landing(self.p, self.m_obj, self.valve_dt - d_valve, self.h, self.theta)) / (2 * d_valve)
-        fd_theta = (landing(self.p, self.m_obj, self.valve_dt, self.h, self.theta + d_theta)
-                    - landing(self.p, self.m_obj, self.valve_dt, self.h, self.theta - d_theta)) / (2 * d_theta)
+        fd_theta = (landing(self.p, self.v, self.h, self.theta + d_theta)
+                    - landing(self.p, self.v, self.h, self.theta - d_theta)) / (2 * d_theta)
+        fd_valve = float('nan')
+        if self.p.energy_source == 'valve':
+            d_valve = 1e-6
+            v_plus = speed(self.p, self.m_obj, self.valve_dt + d_valve)
+            v_minus = speed(self.p, self.m_obj, self.valve_dt - d_valve)
+            fd_valve = (landing(self.p, v_plus, self.h, self.theta)
+                        - landing(self.p, v_minus, self.h, self.theta)) / (2 * d_valve)
         return [fd_valve * 1e-4, fd_theta * np.deg2rad(1.0)]
 
     def report(self):
         s_valve, s_theta = self.sensitivity()
         lines = []
-        lines.append('throw %s   (free: %s, branch: %s)'
-                     % ('SOLVED' if self.success else 'FAILED',
-                        ','.join(self.p.free_vars), self.p.branch))
+        if self.p.energy_source == 'valve':
+            moved = 'free: %s' % ','.join(self.p.free_vars)
+        else:
+            moved = 'measured energy, free: theta'
+        lines.append('throw %s   (%s, branch: %s)'
+                     % ('SOLVED' if self.success else 'FAILED', moved, self.p.branch))
         lines.append('  target      : [%.3f, %.3f, %.3f] m from the throwing point, mass %.3f kg'
                      % (self.target[0], self.target[1], self.target[2], self.m_obj))
         lines.append('  distance    : %.4f m of %.4f m wanted (miss %+.4f m, tol %.4f m)'
                      % (self.dist, self.dist_desired, self.dist - self.dist_desired, self.p.dist_tol))
         lines.append('  valve_dt    : %.6f s  (%d us, ref %.6f s)'
-                     % (self.valve_dt, int(self.valve_dt * 1e6), self.p.valve_ref))
+                     % (self.valve_dt, int(round(self.valve_dt * 1e6)), self.p.valve_ref))
         lines.append('  theta       : %.3f deg  (ref %.3f deg, %s branch)'
                      % (np.rad2deg(self.theta), np.rad2deg(self.p.theta_ref), self.branch))
-        lines.append('  speed       : %.3f m/s, apex %.3f m over the tool, flight %.3f s'
-                     % (self.speed, self.apex, self.time_of_flight))
+        lines.append('  speed       : %.3f m/s (%.3f J), apex %.3f m over the tool, flight %.3f s'
+                     % (self.speed, self.energy, self.apex, self.time_of_flight))
         lines.append('  sensitivity : %+.4f m per 100 us of valve, %+.4f m per deg of theta'
                      % (s_valve, s_theta))
         lines.append('  cost        : %.3f   (%d of %d starts hit the target)'
@@ -297,8 +334,66 @@ class Solution(object):
         return '\n'.join(lines)
 
 
-def solve(p, m_obj, target):
-    """Finds the throw that lands on the target and costs the least."""
+def solve(p, m_obj, e_obj, target):
+    """Finds the throw that lands on the target.
+
+    e_obj [J] is the measured launch energy of the object, only used when
+    energy_source is 'measured': this is the one place the switch is read.
+    """
+    if p.energy_source == 'measured':
+        return _solve_measured(p, m_obj, e_obj, target)
+    return _solve_valve(p, m_obj, target)
+
+
+def _solve_measured(p, m_obj, e_obj, target):
+    """Theta only, the speed is fixed by the measured energy.
+
+    Closed form of the drag free trajectory through the target (R ahead, h below):
+        tan(theta) = (v^2 -+ sqrt(v^4 - g (g R^2 - 2 h v^2))) / (g R)
+    minus is the flat throw ('low' branch), plus the lob ('high' branch).
+    """
+    sol_out = Solution(p, m_obj, target)
+    sol_out.valve_dt = p.used_valve_us * 1e-6
+    sol_out.v = speed_of_energy(m_obj, e_obj)
+    v, g = sol_out.v, p.g
+    R, h = sol_out.dist_desired, sol_out.h
+
+    disc = v ** 4 - g * (g * R ** 2 - 2.0 * h * v ** 2)
+    if disc < 0.0:
+        # beyond the maximum range: the apex angle gets the closest, accepted within dist_tol
+        candidates = [apex_angle(p, v, h)]
+    elif p.branch == 'low':
+        candidates = [atan2(v * v - sqrt(disc), g * R)]
+    elif p.branch == 'high':
+        candidates = [atan2(v * v + sqrt(disc), g * R)]
+    else:
+        # the one closest to theta_ref, what the cost of the valve solver prefers too
+        candidates = sorted([atan2(v * v - sqrt(disc), g * R), atan2(v * v + sqrt(disc), g * R)],
+                            key=lambda t: abs(t - p.theta_ref))
+    inside = [t for t in candidates if p.bound_theta[0] <= t <= p.bound_theta[1]]
+    if not inside:
+        sol_out.reason = ('the launch angles that hit the target (%s deg) are outside '
+                          'bound_theta [%.1f, %.1f] deg on the %s branch'
+                          % (', '.join('%.2f' % np.rad2deg(t) for t in candidates),
+                             np.rad2deg(p.bound_theta[0]), np.rad2deg(p.bound_theta[1]),
+                             p.branch))
+        return sol_out
+
+    sol_out.theta = float(inside[0])
+    sol_out.dist = landing(p, v, h, sol_out.theta)
+    sol_out.miss = abs(sol_out.dist - R)
+    sol_out.obj = 0.0
+    sol_out.n_feasible = len(inside)
+    sol_out.n_starts = len(candidates)
+    sol_out.success = sol_out.miss <= p.dist_tol
+    sol_out.reason = '' if sol_out.success else (
+        'target out of reach: %.3f m away with %.3f m/s (%.3f J), the maximum range at this '
+        'energy is %.3f m' % (R, v, e_obj, sol_out.dist))
+    return sol_out
+
+
+def _solve_valve(p, m_obj, target):
+    """Valve time and/or theta, the cheapest throw that lands on the target."""
     sol_out = Solution(p, m_obj, target)
     dist_desired, h = sol_out.dist_desired, sol_out.h
 
@@ -307,14 +402,14 @@ def solve(p, m_obj, target):
     sol_out.n_starts = len(starts)
 
     cons = [{'type': 'eq',
-             'fun': lambda x: (landing(p, m_obj, x[0], h, x[1]) - dist_desired) / p.dist_scale}]
+             'fun': lambda x: (landing(p, speed(p, m_obj, x[0]), h, x[1]) - dist_desired) / p.dist_scale}]
     if p.branch == 'low':
         # theta below the angle of maximum range: the flattest of the two throws
         cons.append({'type': 'ineq',
-                     'fun': lambda x: apex_angle(p, m_obj, x[0], h) - x[1]})
+                     'fun': lambda x: apex_angle(p, speed(p, m_obj, x[0]), h) - x[1]})
     elif p.branch == 'high':
         cons.append({'type': 'ineq',
-                     'fun': lambda x: x[1] - apex_angle(p, m_obj, x[0], h)})
+                     'fun': lambda x: x[1] - apex_angle(p, speed(p, m_obj, x[0]), h)})
 
     feasible = []    # (cost, miss, x) of the starts that actually hit the target
     fallback = None  # best effort if none of them does
@@ -324,13 +419,14 @@ def solve(p, m_obj, target):
         if not np.all(np.isfinite(sol.x)):
             continue
         # the solver reports success on its own model, the acceptance is ours
-        if not reaches(p, m_obj, sol.x[0], h, sol.x[1]):
+        v = speed(p, m_obj, sol.x[0])
+        if not reaches(p, v, h, sol.x[1]):
             continue
-        miss = abs(landing(p, m_obj, sol.x[0], h, sol.x[1]) - dist_desired)
+        miss = abs(landing(p, v, h, sol.x[1]) - dist_desired)
         if not np.isfinite(miss):
             continue
         if p.branch != 'any':
-            apex = apex_angle(p, m_obj, sol.x[0], h)
+            apex = apex_angle(p, v, h)
             wrong = (sol.x[1] > apex + 1e-6) if p.branch == 'low' else (sol.x[1] < apex - 1e-6)
             if wrong:
                 continue
@@ -356,5 +452,6 @@ def solve(p, m_obj, target):
 
     sol_out.valve_dt = float(x[0])
     sol_out.theta = float(x[1])
-    sol_out.dist = landing(p, m_obj, sol_out.valve_dt, h, sol_out.theta)
+    sol_out.v = speed(p, m_obj, sol_out.valve_dt)
+    sol_out.dist = landing(p, sol_out.v, h, sol_out.theta)
     return sol_out

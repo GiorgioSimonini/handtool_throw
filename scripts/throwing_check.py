@@ -12,12 +12,15 @@ base frame: subtract '/testing/throw_pose' position first, or pass it with
   # one throw, target 2.7 m ahead and 1.29 m below the tool
   ./throwing_check.py --mass 0.1 --target 2.7 0.0 -1.29
 
+  # the 7 cm ball with its measured energy (energy_source: measured)
+  ./throwing_check.py --mass 0.144 --energy 1.413 --target 3.0 0.0 -1.51
+
   # the same target written in the robot base frame
   ./throwing_check.py --mass 0.1 --target 3.0 0.0 -0.94 --from 0.3 -0.4 0.35
 
-  # theta as the only free variable, both branches allowed
+  # the valve energy model, theta as the only free variable, both branches allowed
   ./throwing_check.py --mass 0.1 --target 2.7 0.0 -1.29 \
-      --set free_vars=theta branch=any
+      --set energy_source=valve free_vars=theta branch=any
 
   # compare several parameter sets on the same throw
   ./throwing_check.py --mass 0.1 --target 2.7 0.0 -1.29 \
@@ -45,6 +48,8 @@ YAML_KEYS = {
     'dist_min': ('dist_min', float),
     'valve_0': ('valve_0', float),
     'g': ('g', float),
+    'energy_source': ('energy_source', str),
+    'used_valve_us': ('used_valve_us', int),
     'energy_a1': ('energy_a1', float),
     'energy_a2': ('energy_a2', float),
     'energy_a3': ('energy_a3', float),
@@ -131,6 +136,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--yaml', default=DEFAULT_YAML, help='parameter file to start from')
     ap.add_argument('--mass', type=float, default=0.1, help='[kg] object mass')
+    ap.add_argument('--energy', type=float, default=0.0,
+                    help="[J] measured launch energy, used when energy_source is 'measured'")
     ap.add_argument('--target', type=float, nargs=3, default=[2.7, 0.0, -1.29],
                     metavar=('X', 'Y', 'Z'),
                     help='[m] target measured from the throwing point')
@@ -168,28 +175,32 @@ def main():
         p = build_params(yaml_block, settings)
         header = 'case %s' % name if name else 'parameters of %s' % os.path.basename(args.yaml)
         print('\n=== %s ===' % header)
-        print('free_vars %s | branch %s | valve_ref %.5f s | theta_ref %.1f deg | '
-              'w_valve %g scale %g | w_theta %g scale %.1f deg'
-              % (p.free_vars, p.branch, p.valve_ref, np.rad2deg(p.theta_ref),
-                 p.w_valve, p.valve_scale, p.w_theta, np.rad2deg(p.theta_scale)))
+        if p.energy_source == 'measured':
+            print("energy_source measured (%.3f J) | branch %s | theta_ref %.1f deg | valve %d us"
+                  % (args.energy, p.branch, np.rad2deg(p.theta_ref), p.used_valve_us))
+        else:
+            print('energy_source valve | free_vars %s | branch %s | valve_ref %.5f s | '
+                  'theta_ref %.1f deg | w_valve %g scale %g | w_theta %g scale %.1f deg'
+                  % (p.free_vars, p.branch, p.valve_ref, np.rad2deg(p.theta_ref),
+                     p.w_valve, p.valve_scale, p.w_theta, np.rad2deg(p.theta_scale)))
         if args.sweep is not None:
             print('%9s %8s %9s %8s %8s %7s %9s %9s %6s'
                   % ('want[m]', 'got[m]', 'valve[us]', 'theta', 'v[m/s]', 'apex', 'm/100us',
                      'm/deg', 'ok'))
             for target in targets:
-                sol = tm.solve(p, args.mass, target)
+                sol = tm.solve(p, args.mass, args.energy, target)
                 sv, st = sol.sensitivity()
                 print('%9.3f %8.3f %9d %8.2f %8.2f %7.2f %9.4f %9.4f %6s'
-                      % (sol.dist_desired, sol.dist, int(sol.valve_dt * 1e6),
+                      % (sol.dist_desired, sol.dist, int(round(sol.valve_dt * 1e6)),
                          np.rad2deg(sol.theta), sol.speed, sol.apex, sv, st,
                          'yes' if sol.success else 'NO'))
         else:
             for target in targets:
-                error = tm.check_target(p, args.mass, target)
+                error = tm.check_target(p, args.mass, args.energy, target)
                 if error:
                     print('rejected: %s' % error)
                     continue
-                print(tm.solve(p, args.mass, target).report())
+                print(tm.solve(p, args.mass, args.energy, target).report())
 
 
 if __name__ == '__main__':

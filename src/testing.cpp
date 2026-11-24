@@ -83,11 +83,13 @@ Eigen::Affine3d throw_pose;
 struct Object {
 	string name;					// only used in the printouts
 	double m_obj;					// [kg] mass, sent to the throwing parameters service
+	double e_obj;					// [J] measured launch energy, sent to the service. Needed
+									//     only when optimization/energy_source is 'measured'
 	Eigen::Affine3d grasp_pose;		// pose the suction cup grabs the object from
 	bool has_target;				// true: the yaml carries a target, qualisys is not needed
 	geometry_msgs::Point target;	// [m] target box position
 
-	Object() : m_obj(0.0), has_target(false) {
+	Object() : m_obj(0.0), e_obj(0.0), has_target(false) {
 		grasp_pose.setIdentity();
 	}
 };
@@ -216,6 +218,11 @@ bool loadObjects(ros::NodeHandle &nh, vector<Object> &objects)
 		// - mass, required by the throwing parameters service - //
 		if ((!item.hasMember("mass")) || (!getDouble(item["mass"], obj.m_obj)) || (obj.m_obj <= 0.0)){
 			ROS_ERROR("objects[%d] (%s): 'mass' missing, malformed or not positive, skipped", i, obj.name.c_str());
+			continue;
+		}
+		// - measured launch energy, optional: the service rejects the object if it needs it - //
+		if (item.hasMember("energy") && ((!getDouble(item["energy"], obj.e_obj)) || (obj.e_obj <= 0.0))){
+			ROS_ERROR("objects[%d] (%s): 'energy' malformed or not positive, skipped", i, obj.name.c_str());
 			continue;
 		}
 		// - grasping pose, required - //
@@ -369,7 +376,7 @@ bool moveToPose(ros::Publisher &pub_command, const Eigen::Affine3d &pose_d, doub
 //     turns them into the robot pose to throw from.
 //     target_req is in the ROBOT BASE frame, the service wants it measured from the
 //     throwing point: this is the only place where the two frames meet --- //
-bool getThrowingPar(ros::ServiceClient &handtool_client, double m_obj,
+bool getThrowingPar(ros::ServiceClient &handtool_client, double m_obj, double e_obj,
 					const geometry_msgs::Point &target_req,
 					int &valve_us_out, Eigen::Affine3d &pose_d_out)
 {
@@ -379,6 +386,7 @@ bool getThrowingPar(ros::ServiceClient &handtool_client, double m_obj,
 
 	handtool_throw::throwing_par_srv srv;
 	srv.request.m_obj = m_obj;
+	srv.request.energy = e_obj;
 	srv.request.target.x = target_rel(0);
 	srv.request.target.y = target_rel(1);
 	srv.request.target.z = target_rel(2);
@@ -583,31 +591,33 @@ int main(int argc, char **argv)
 			throwObject(pub_throw);
 		}else if (choice == 5){
 			// --- get parameters for handtool throwing --- //
-			cout << "insert object weight and target x, y, z positions (m_obj x y z):" << endl;
-			double m_obj;
+			cout << "insert object weight, launch energy and target x, y, z positions (m_obj energy x y z):" << endl;
+			double m_obj, e_obj;
 			geometry_msgs::Point target_req;
 			cin >> m_obj;
+			cin >> e_obj;
 			cin >> target_req.x;
 			cin >> target_req.y;
 			cin >> target_req.z;
 			// the solution is printed by the helper, nothing else to do here
 			int valve_opt;
 			Eigen::Affine3d pose_opt;
-			getThrowingPar(handtool_client, m_obj, target_req, valve_opt, pose_opt);
+			getThrowingPar(handtool_client, m_obj, e_obj, target_req, valve_opt, pose_opt);
 			ros::Duration(0.1).sleep();
 		}else if (choice == 6){
 			// --- Complete throwing cycle --- //
 			// - get mass of object - //
-			cout<<"insert object weight (m_obj): "<<endl;
-			double m_obj;
+			cout<<"insert object weight and launch energy (m_obj energy): "<<endl;
+			double m_obj, e_obj;
 			cin >> m_obj;
+			cin >> e_obj;
 
 			// - get target box position and current robot pose - //
 			cout<<"waiting for target and robot poses..."<<endl;
 			if (!waitForPoses(true)) break;
 
 			// - get throwing parameters - //
-			if (!getThrowingPar(handtool_client, m_obj, target, valve_us, franka_pose_d)){
+			if (!getThrowingPar(handtool_client, m_obj, e_obj, target, valve_us, franka_pose_d)){
 				ROS_ERROR("no throwing parameters, no command is sent");
 				continue;
 			}
@@ -639,7 +649,7 @@ int main(int argc, char **argv)
 			for (size_t i = 0; (i < objects.size()) && ros::ok(); i++){
 				const Object &obj = objects[i];
 				cout<<"--- object "<<(i+1)<<"/"<<objects.size()<<": "<<obj.name
-					<<" (mass "<<obj.m_obj<<" kg) ---"<<endl;
+					<<" (mass "<<obj.m_obj<<" kg, energy "<<obj.e_obj<<" J) ---"<<endl;
 
 				// - target: the one of the yaml, or the measured one if the yaml has none - //
 				geometry_msgs::Point target_obj;
@@ -655,7 +665,7 @@ int main(int argc, char **argv)
 				// - throwing parameters first: a failure must not leave the object grabbed - //
 				int valve_obj;
 				Eigen::Affine3d throw_pose;
-				if (!getThrowingPar(handtool_client, obj.m_obj, target_obj, valve_obj, throw_pose)){
+				if (!getThrowingPar(handtool_client, obj.m_obj, obj.e_obj, target_obj, valve_obj, throw_pose)){
 					ROS_ERROR("%s: no throwing parameters, object skipped", obj.name.c_str());
 					continue;
 				}

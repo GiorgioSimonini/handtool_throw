@@ -18,7 +18,9 @@ testing:
   #             side the flange stays on while aiming: it does NOT move the landing point.
   # Written as rpy_deg [r, p, y] or as orientation [x, y, z, w], like every other pose.
   throw_pose:
-    position: [0.3, -0.4, 0.35]         # [m]
+    # tube tip of the ball experiments (configs/ball_throwing.txt), where the measured
+    # energies of configs/ball_landing_points.yaml were identified from
+    position: [0.004409546493154309, -0.3539862827431612, 0.6082828747171136]   # [m]
     orientation: [1.0, 0.0, 0.0, 0.0]   # [x,y,z,w] tube along +x, flange above the tube
     # rpy_deg: [90.0, 0.0, 0.0]         # flange on the left, what the service hard-coded
 
@@ -30,6 +32,15 @@ optimization:
   dist_min: 0.05                # [m] a target closer than this to the throwing point (horizontally) is rejected: no throwing direction
   valve_0: 0.051                # [s] valve opening time with no throw (energy model offset)
   g: 9.81                       # [m/s^2]
+
+  # --- where the launch energy comes from --- #
+  #   measured  the energy of the object comes with the request (the 'energy' field of
+  #             each object, from configs/ball_landing_points.yaml): theta is the only
+  #             unknown, the valve is always opened for used_valve_us. The block of
+  #             the valve model below is not used.
+  #   valve     identified valve energy model below, the optimizer moves free_vars
+  energy_source: measured
+  used_valve_us: 70000          # [us] valve time the ball energies were measured with
   bound_valve: [0.06, 0.5]    # [s] the lower bound must stay OFF valve_0: on it the throw has no energy and the log model has an infinite slope
   bound_theta_deg: [0.0, 90.0]  # [deg], converted to rad by the node
 

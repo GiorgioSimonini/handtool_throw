@@ -5,9 +5,13 @@
 # robot base (x forward, y left, z up). The caller owns the throwing pose and is
 # the one that subtracts it, see '/testing/throw_pose'.
 float32 m_obj
+# [J] launch energy measured for this object (configs/ball_landing_points.yaml).
+# Used only when optimization/energy_source is 'measured', ignored with 'valve'.
+float32 energy
 geometry_msgs/Point target
 ---
-# valve opening time and launch angle over the horizon. The aiming azimuth is not
+# valve opening time and launch angle over the horizon. With a 'measured' energy the
+# valve time is always optimization/used_valve_us. The aiming azimuth is not
 # answered: it is atan2(target.y, target.x) of the request, the caller already has it.
 uint32 result_valve_us
 float32 result_theta
