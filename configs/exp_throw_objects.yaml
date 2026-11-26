@@ -14,10 +14,14 @@ testing:
   # can be moved and turned, the point follows it. [0, 0, 0] is the origin of the body.
   box_target_offset: [0.0, 0.0, 0.0]
 
-  # [m] every ball is thrown from here: 6 cm above the grasp position of ball6cm, the first
-  # one. Thrown from above ball7cm and ball8cm the tool hits the robot. Update it when the
-  # grasp pose of ball6cm changes.
-  throw_position: [0.4163, -0.1710, 0.5]
+  # [m] every ball is thrown from here: above ball6cm, the first one (thrown from above
+  # ball7cm and ball8cm the tool hits the robot), 3 cm back for the air hose.
+  # z = 0.70: lower, the tube end behind the flange swings under the top of the rack on the
+  # steep throws (0 cm left at 80 deg from z = 0.50), and the elbow (q4) and the wrist (q6)
+  # are at their limits. From here, kinematic check of the whole sequence up to 80 deg:
+  # >= 6 cm from the rack, >= 0.34 rad from the joint limits.
+  # Update it when the grasp pose of ball6cm changes.
+  throw_position: [0.3863, -0.1710, 0.70]
 
   # mass and energy of configs/ball_landing_points.yaml. An object without grasp_pose is
   # skipped with an error: fill each one with the measured pose of the tube tip on the
