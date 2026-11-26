@@ -72,7 +72,8 @@ bool has_default_pose = false;						// false: the yaml does not carry a valid on
 Eigen::Vector3d approach_offset(-0.1, 0.0, 0.0);	// [m] grasping pose -> approach pose, tip frame
 double move_time = 3.0;								// [s] duration of the long motions
 double approach_time = 1.5;							// [s] duration of the approach/retreat motions
-double pre_throw_time = 1.0;						// [s] settling time on the throwing pose, before the throw
+double throw_angle_tol = 1.0;						// [deg] tube axis error accepted at the blow
+double throw_settle_timeout = 10.0;					// [s] longest wait for it on the throwing pose
 Eigen::Vector3d throw_position(0.0, 0.0, 0.0);		// [m] base frame, throwing point of every object
 bool has_throw_position = false;					// false: the yaml does not carry one, choice 7 is disabled
 
@@ -415,6 +416,43 @@ void throwObject(ros::Publisher &pub_throw)
 	ros::Duration(0.1).sleep();
 }
 
+// --- waypoint between two poses that turn the tube by up to ~180 deg (pointing down <->
+//     aiming up): on the position 'at', with the orientation halfway from a to b, so each
+//     of the two segments turns at most ~90 deg. In one segment the backstepping lags more
+//     than 60 deg behind (its L is singular at 90 deg) and, close to 180 deg, the rotation
+//     axis is barely defined --- //
+Eigen::Affine3d halfwayPose(const Eigen::Vector3d &at, const Eigen::Affine3d &a, const Eigen::Affine3d &b)
+{
+	Eigen::Affine3d pose = Eigen::Affine3d::Identity();
+	pose.translation() = at;
+	pose.linear() = Eigen::Quaterniond(a.linear()).slerp(0.5, Eigen::Quaterniond(b.linear())).toRotationMatrix();
+	return pose;
+}
+
+// --- waits on the pose_d until the measured tube axis (x of the tip frame) is within
+//     tol_deg of the commanded one, or until timeout. The roll around the tube is not
+//     checked, it does not change the throw. err_deg: the last measured error [deg].
+//     false: timeout or ros shut down --- //
+bool waitTubeAxis(const Eigen::Affine3d &pose_d, double tol_deg, double timeout, double &err_deg)
+{
+	const Eigen::Vector3d axis_d = pose_d.linear() * Eigen::Vector3d::UnitX();
+	const ros::Time start = ros::Time::now();
+	ros::Rate rate(100);
+	err_deg = 180.0;
+	has_franka_pose = false;
+	while (ros::ok()){
+		ros::spinOnce();
+		if (has_franka_pose){
+			const Eigen::Vector3d axis = franka_pose.linear() * Eigen::Vector3d::UnitX();
+			err_deg = atan2(axis.cross(axis_d).norm(), axis.dot(axis_d)) * 180.0 / M_PI;
+			if (err_deg <= tol_deg) return true;
+		}
+		if ((ros::Time::now() - start).toSec() >= timeout) return false;
+		rate.sleep();
+	}
+	return false;
+}
+
 // --- blocks until the user presses enter, false on closed input --- //
 bool waitKeyPress(const string &message)
 {
@@ -501,8 +539,11 @@ int main(int argc, char **argv)
 	if (!nh_.getParam("/testing/approach_time", approach_time)) {
 		ROS_WARN("Failed to get param");
 	}
-	if (!nh_.getParam("/testing/pre_throw_time", pre_throw_time)) {
-		ROS_WARN("Failed to get param");
+	if (!nh_.getParam("/testing/throw_angle_tol", throw_angle_tol)) {
+		ROS_WARN("Failed to get param '/testing/throw_angle_tol', keeping %.1f deg", throw_angle_tol);
+	}
+	if (!nh_.getParam("/testing/throw_settle_timeout", throw_settle_timeout)) {
+		ROS_WARN("Failed to get param '/testing/throw_settle_timeout', keeping %.1f s", throw_settle_timeout);
 	}
 	// - pose the object is thrown from, the built in one is kept if the yaml has none - //
 	XmlRpc::XmlRpcValue throw_pose_par;
@@ -614,8 +655,12 @@ int main(int argc, char **argv)
 			throwObject(pub_throw);
 		}else if (choice == 7){
 			// --- automatic sequence over the objects listed in the yaml --- //
-			// for every object: default pose -> approach -> grasp -> suck -> retreat
-			//                   -> throwing pose -> throw -> default pose -> key press
+			// default pose, then for every object:
+			//   approach -> grasp -> suck -> retreat -> waypoint -> throwing pose -> throw
+			//   -> key press
+			// and back to the default pose at the end. The robot goes from one throwing pose
+			// to the next approach pose directly, through the waypoint: the default pose is
+			// low and the trip there passes close to the rack.
 			// every object is thrown from the same point, throw_position
 			if (!has_default_pose){
 				ROS_ERROR("no valid '/testing/default_pose', fill it in the objects yaml first");
@@ -638,6 +683,13 @@ int main(int argc, char **argv)
 
 			// drop the newline left by 'cin >> choice', the first key press would eat it
 			cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+			cout<<"going to the default position..."<<endl;
+			if (!moveToPose(pub_command, default_pose, move_time)) continue;
+			// the robot leaves every throw on its throwing pose: the next motion starts
+			// from there, through the waypoint
+			bool at_throw_pose = false;
+			Eigen::Affine3d last_throw_pose;
 
 			for (size_t i = 0; (i < objects.size()) && ros::ok(); i++){
 				const Object &obj = objects[i];
@@ -673,12 +725,13 @@ int main(int argc, char **argv)
 				//   TIP frame of the grasping pose: -x moves the tool away from the object - //
 				Eigen::Affine3d approach_pose = obj.grasp_pose * Eigen::Translation3d(approach_offset);
 
-				// - go to the default position - //
-				cout<<"going to the default position..."<<endl;
-				if (!moveToPose(pub_command, default_pose, move_time)) break;
-
-				// - reach the object, through the approach pose - //
+				// - reach the object, through the approach pose. From the last throwing pose
+				//   the tube turns from aiming up to pointing down: waypoint first - //
 				cout<<"reaching the object..."<<endl;
+				if (at_throw_pose){
+					if (!moveToPose(pub_command, halfwayPose(last_throw_pose.translation(), last_throw_pose, approach_pose), move_time)) break;
+					at_throw_pose = false;
+				}
 				if (!moveToPose(pub_command, approach_pose, move_time)) break;
 				if (!moveToPose(pub_command, obj.grasp_pose, approach_time)) break;
 
@@ -689,33 +742,40 @@ int main(int argc, char **argv)
 				// - leave the grasping place before moving away - //
 				if (!moveToPose(pub_command, approach_pose, approach_time)) break;
 
-				// - to the throwing pose in two segments. From the tube pointing
-				//   down to the tube aiming up the tool turns by 145-178 deg: in one segment the
-				//   backstepping lags more than 60 deg behind (its L is singular at 90 deg) and,
-				//   close to 180 deg, the rotation axis is barely defined. The waypoint sits on
-				//   the throwing position with the orientation halfway along the rotation, so
-				//   each segment turns at most ~90 deg - //
-				Eigen::Affine3d waypoint = throw_pose_obj;
-				waypoint.linear() = Eigen::Quaterniond(approach_pose.linear())
-									.slerp(0.5, Eigen::Quaterniond(throw_pose_obj.linear())).toRotationMatrix();
+				// - to the throwing pose, through the waypoint on the throwing position - //
 				cout<<"going to the throwing pose..."<<endl;
-				if (!moveToPose(pub_command, waypoint, move_time)) break;
+				if (!moveToPose(pub_command, halfwayPose(throw_position, approach_pose, throw_pose_obj), move_time)) break;
 				if (!moveToPose(pub_command, throw_pose_obj, move_time)) break;
 
-				// - the controller reaches the commanded pose with some delay, give it
-				//   the time to settle before letting the object go - //
-				ros::Duration(pre_throw_time).sleep();
+				// - the trajectory ends with the tube 20-30 deg short of the commanded pitch on
+				//   the steep throws, and on a lob every degree too flat sends the object
+				//   3-11 cm long: blow only once the tube points where commanded - //
+				double axis_err;
+				const ros::Time settle_start = ros::Time::now();
+				if (waitTubeAxis(throw_pose_obj, throw_angle_tol, throw_settle_timeout, axis_err)){
+					cout<<"tube axis within "<<axis_err<<" deg of the command after "
+						<<(ros::Time::now() - settle_start).toSec()<<" s"<<endl;
+				}else{
+					ROS_WARN("%s: tube axis still %.2f deg from the command after %.1f s, thrown anyway",
+						obj.name.c_str(), axis_err, throw_settle_timeout);
+				}
+				if (!ros::ok()) break;
 
 				// - throw - //
 				cout<<"throwing..."<<endl;
 				throwObject(pub_throw);
+				at_throw_pose = true;
+				last_throw_pose = throw_pose_obj;
 
-				// - back to the default position - //
-				cout<<"going back to the default position..."<<endl;
-				if (!moveToPose(pub_command, default_pose, move_time)) break;
-
-				// - the next object is started by hand - //
+				// - the next object is started by hand, the robot waits on the throwing pose - //
 				if (!waitKeyPress("object thrown, press enter to continue")) break;
+			}
+			// - back to the default position, from the last throwing pose through its waypoint - //
+			if (at_throw_pose && ros::ok()){
+				cout<<"going back to the default position..."<<endl;
+				if (moveToPose(pub_command, halfwayPose(last_throw_pose.translation(), last_throw_pose, default_pose), move_time)){
+					moveToPose(pub_command, default_pose, move_time);
+				}
 			}
 			cout<<"objects sequence ended"<<endl;
 		}

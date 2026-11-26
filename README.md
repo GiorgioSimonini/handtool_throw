@@ -181,18 +181,21 @@ apex height, flight time, and the sensitivity of the landing point to one degree
 
 This file is used by choice 7 and lives in the `testing` namespace:
 
-- `default_pose`: where the sequence starts and returns to after every throw. Choice 7
+- `default_pose`: where the sequence starts and ends. Choice 7
   refuses to run without it.
 - `approach_offset`: [m] offset of the approach pose, in the tip frame of the grasp pose.
   -x backs the tool away along the tube.
 - `throw_position`: [m] throwing point of every object (tube tip at the blow), in the base
   frame. Choice 7 refuses to run without it. All the objects leave from the same point: thrown
   from above their own grasp, the balls on the +y side of the row put the tool against the
-  robot. In the ball experiment it is 6 cm above the grasp position of `ball6cm`, see
-  `exp_throw_objects.yaml`. Keep it clear of the objects still resting: with the tube almost
-  vertical the wrist hangs about 0.4 m under the tip.
-- `move_time`, `approach_time`, `pre_throw_time`: [s] durations of the long and short
-  motions, and settling time on the throwing pose before the blow.
+  robot. In the ball experiment it is above `ball6cm`, see `exp_throw_objects.yaml`. Keep it
+  high: the tube runs 22 cm behind the flange, so on a steep throw its rear end swings down
+  and back, under the tip, and a low throwing point also folds the elbow (q4) and the wrist
+  (q6) to their limits.
+- `move_time`, `approach_time`: [s] durations of the long and short motions.
+- `throw_angle_tol` [deg], `throw_settle_timeout` [s]: on the throwing pose the blow waits
+  until the measured tube axis is within `throw_angle_tol` of the commanded one. After
+  `throw_settle_timeout` it throws anyway, with a warning that gives the remaining error.
 - `objects`: the list thrown one after the other. Each entry has:
 
   | Field | Required | Meaning |
@@ -255,18 +258,27 @@ The testing node asks for a choice on the keyboard:
 For each object, choice 7 runs:
 
 ```
-default pose -> approach pose -> grasp pose -> suction -> approach pose
-             -> waypoint -> throwing pose (throw_position) -> wait pre_throw_time -> blow
-             -> default pose -> press enter
+default pose
+  for each object:
+    [waypoint, after a throw] -> approach pose -> grasp pose -> suction -> approach pose
+    -> waypoint -> throwing pose (throw_position) -> wait for the tube axis -> blow -> press enter
+-> waypoint -> default pose
 ```
 
+- **No default pose between the objects:** after a throw the robot waits on the throwing
+  pose for the key press, then goes to the next approach pose through a waypoint. The
+  default pose is low, and the trip there passed 5 cm from the rack of the balls.
+
 - **Waypoint:** it sits on the throwing position, with the orientation halfway along the
-  rotation from the grasp (tube pointing down) to the throw (tube aiming up). That rotation
+  rotation from the grasp (tube pointing down) to the throw (tube aiming up), and the same
+  on the way back to the next object. That rotation
   is 145–178°. Done in one segment, the backstepping lags more than 60° behind (its
   orientation law is singular at 90°), and near 180° the rotation axis is barely defined.
   With the waypoint, each segment turns at most about 90°.
-- **`pre_throw_time` is 5 s:** in simulation, 1 s left the tube 4–11° short of the commanded
-  pitch at the blow.
+- **Wait for the tube axis, not for a fixed time:** the trajectory ends with the tube 20–30°
+  short of the commanded pitch on the steep throws. In the experiment of 2026-11-24, a fixed
+  2 s wait left it 6.5–8° short, and the lobs landed 0.7–1.05 m long (each degree too flat is
+  3–11 cm long on those lobs). The node prints the error it reached and how long it took.
 
 The throwing parameters are asked first, so an object the service cannot throw is skipped
 before it is grabbed. The valve time of the answer is sent to the Arduino before the
@@ -307,10 +319,15 @@ roslaunch handtool_throw handtool_throw_exp.launch robot_ip:=<robot ip>   # rviz
 - **`box_target_offset`:** the point the ball centre aims at, in the frame of the
   `box_target` rigid body. Because it is in the box frame, the box can be moved and turned
   between throws.
-- **`throw_position`:** where every ball is thrown from, 6 cm above the grasp position of
-  `ball6cm` (the first ball, thrown first, so that spot is free by then). Thrown from above
-  `ball7cm` or `ball8cm`, the tool hits the robot. Update it whenever the grasp pose of
-  `ball6cm` is measured again.
+- **`throw_position`:** where every ball is thrown from: above `ball6cm` (the first ball,
+  thrown first, so that spot is free by then), 3 cm back for the air hose, at z = 0.70 m.
+  Thrown from above `ball7cm` or `ball8cm`, the tool hits the robot. From z = 0.50 m the rear
+  end of the tube came down to the top of the rack at 80° (0 cm), and the elbow and the wrist
+  were at their limits. A kinematic check of the whole sequence from 0.70 m (bag of
+  2026-11-24, Panda collision capsules, the rack as a 3 cm bar under the balls) gives at
+  least 6 cm from the rack and 0.34 rad from the joint limits, for throws up to 80°. The air
+  hose and the real shape of the rack are not in that check. Update it whenever the grasp
+  pose of `ball6cm` is measured again.
 
 **How a target is measured.** The balls have no `target`, so before each one is grabbed the
 testing node waits for fresh poses of the two QTM rigid bodies:
@@ -327,7 +344,7 @@ target = R_base^T * (p_box + R_box * box_target_offset - p_base)
 
 It prints the target, publishes it to RViz, and asks the service for the angle. The
 sequence then continues exactly as in simulation: grasp, waypoint, throw from
-`throw_position`, default pose. If the box is out of reach, the object is skipped before it
+`throw_position`. If the box is out of reach, the object is skipped before it
 is grabbed.
 
 ## Running in simulation
